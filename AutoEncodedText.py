@@ -22,8 +22,7 @@ class AutoEncoderTextModel():
             BinaryAccuracy(name='accuracy'),
             Precision(name='precision'),
             Recall(name='recall'),
-            AUC(name='auc'),
-            Mean(name='mean')
+            AUC(name='auc')
         ]
 
 
@@ -175,6 +174,7 @@ class AutoEncoderTextModel():
         output = Dense(172, activation="sigmoid", name="Output")(dropput)
 
         model = Model([overview_input, plot_input, subtitles_input], output)
+
         model.compile(loss='binary_crossentropy',
                       optimizer='adamax',
                       metrics=self.METRICS)
@@ -195,7 +195,7 @@ class AutoEncoderTextModel():
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
-        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_precision_{precision:.3f}-recall_{recall:.3f}-auc_{auc:.3f}-mean_{mean:.3f}.ckpt"
+        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_precision_{precision:.3f}-recall_{recall:.3f}-auc_{auc:.3f}.ckpt"
 
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
                                                          save_weights_only=True,
@@ -230,8 +230,8 @@ if __name__ == "__main__":
 
     vectorizer = MultiVectorizer()
     auto_encoder_text = AutoEncoderTextModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data.xlsx")
-    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=200, batch_size=5)
+    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data.xlsx", rows=200, validation_split=0.20)
+    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=200, batch_size=4)
 
 
     print("Done")
