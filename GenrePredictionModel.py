@@ -114,8 +114,79 @@ class GenrePredictionModel():
         subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
         return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(plot_data), self.pad_list_of_lists(subtitles_data)
 
+    def get_three_input_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
 
-    def get_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
+        print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
+
+        overview_input = Input(shape=(None, None), dtype='int64', name="OverviewInput")
+        plot_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
+        subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
+        sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
+
+        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
+        spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
+        cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
+        max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
+        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
+        sentence_model = Model(sentence_input, sentence_encoding)
+
+        segment_time_distributed = TimeDistributed(sentence_model, name="TimeDistributedSegment")
+        segment_cnn = Conv1D(number_of_labels, 2, padding="same", activation="relu", name="SegmentConv1D")
+        segment_max_pool = MaxPooling1D(pool_size=3, name="SegementMaxPool1D")
+
+        segment_cnn_2 = Conv1D(number_of_labels, 5, padding="same", activation="relu", name="Segment2Conv1D")
+        segment_max_pool_2 = MaxPooling1D(pool_size=3, name="Segment2MaxPool1D")
+
+        overview_time_distributed = segment_time_distributed(overview_input)
+        overview_cnn = segment_cnn(overview_time_distributed)
+        overview_maxpool = segment_max_pool(overview_cnn)
+
+        plot_time_distributed = segment_time_distributed(plot_input)
+        plot_cnn = segment_cnn(plot_time_distributed)
+        plot_maxpool = segment_max_pool(plot_cnn)
+
+        subtitles_timedistributed = segment_time_distributed(subtitles_input)
+        subtitles_cnn = segment_cnn_2(subtitles_timedistributed)
+        subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
+
+        overview_dropout = SpatialDropout1D(0.40)(overview_maxpool)
+        overview_pre_attention_output = Dense(number_of_labels, name="OverviewPreAttnOutput")(overview_dropout)
+
+        plot_dropout = SpatialDropout1D(0.40)(plot_maxpool)
+        plot_pre_attention_output = Dense(number_of_labels, name="PlotPreAttnOutput")(plot_dropout)
+
+        subtitles_dropout = SpatialDropout1D(0.40, name="SubtitlesDropout")(subtitles_maxpool)
+        subtitles_pre_attention_output = Dense(number_of_labels, name="SubtitlesPreAttnOutput")(subtitles_dropout)
+
+        attention_overview = AdditiveAttention(name="OverviewAttention")([overview_pre_attention_output, overview_maxpool])
+        attention_plot = AdditiveAttention(name="PlotAttention")([plot_pre_attention_output, plot_maxpool])
+        attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
+
+        overview_output = GlobalAveragePooling1D(name="GlobalAvgPoolOverview")(attention_overview)
+        plot_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_plot)
+        subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
+
+        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([overview_output, plot_output, subtitles_output])
+        dropput = Dropout(0.40)(concat_output)
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
+
+        model = Model([overview_input, plot_input, subtitles_input], output)
+
+        model.compile(loss='binary_crossentropy',
+                      optimizer='adamax',
+                      metrics=self.METRICS)
+
+        print(sentence_model.summary())
+        print(model.summary())
+        self.sentence_model = sentence_model
+        self.model = model
+        if self.load_weights:
+            self.sentence_model.load_weights("data/weights/sentence_model.h5")
+            self.model.load_weights("data/weights/model.h5")
+            self.vectorizer.load("data/weights/vectorizer.dat")
+        return sentence_model, model
+
+    def get_subtitle_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
 
         print("Vocabulary Size:",self.vectorizer.get_vocabulary_size())
 
