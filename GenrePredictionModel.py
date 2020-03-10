@@ -109,10 +109,10 @@ class GenrePredictionModel():
         return result
 
     def preprocess(self, data):
-        overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
-        plot_data = self.vectorizer.fit(data["Plot"].apply(self.get_sentences).values)
+        #overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
+        #plot_data = self.vectorizer.fit(data["Plot"].apply(self.get_sentences).values)
         subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
-        return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(plot_data), self.pad_list_of_lists(subtitles_data)
+        return self.pad_list_of_lists(subtitles_data) #self.pad_list_of_lists(overview_data), self.pad_list_of_lists(plot_data),
 
     def get_three_input_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
 
@@ -235,10 +235,10 @@ class GenrePredictionModel():
 
     def fit(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10):
         print("Pre-processing training data...")
-        overview_input, plot_input, subtitles_input = self.preprocess(data)
+        subtitles_input = self.preprocess(data)
         print("Pre-processing validation data...")
-        overview_validation_input, plot_validation_input, subtitles_validation_input = self.preprocess(validation_data)
-        self.sentence_model, self.model = self.get_model(load_weights=self.load_weights)
+        subtitles_validation_input = self.preprocess(validation_data)
+        self.sentence_model, self.model = self.get_subtitle_model(load_weights=self.load_weights)
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
@@ -248,7 +248,7 @@ class GenrePredictionModel():
                                                          save_weights_only=True,
                                                          verbose=1)
 
-        self.model.fit([overview_input, plot_input, subtitles_input], labels, validation_data=([overview_validation_input, plot_validation_input, subtitles_validation_input], validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
+        self.model.fit(subtitles_input, labels, validation_data=(subtitles_validation_input, validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
 
 
     class CallbackActions(Callback):
