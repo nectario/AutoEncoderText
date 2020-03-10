@@ -13,8 +13,7 @@ from tqdm._tqdm_notebook import tqdm_notebook
 from tensorflow.keras.metrics import *
 tqdm_notebook.pandas()
 
-class AutoEncoderTextModel():
-
+class GenrePredictionModel():
     def __init__(self, vectorizer=None, load_weights=False):
         self.vectorizer = vectorizer
         self.load_weights = load_weights
@@ -25,15 +24,14 @@ class AutoEncoderTextModel():
             AUC(name='auc')
         ]
 
-
     def load_data(self, file_path, rows=None, validation_split=None):
         data_df = pd.read_excel(file_path, nrows=rows)
+        data_df = data_df[data_df.Exclude == False]
 
         if validation_split is not None:
             data_df = data_df[data_df.Training == True].reset_index()
             training_df = data_df[:int(1 - data_df.shape[0]*validation_split)]
             validation_df = data_df[int(1 - data_df.shape[0]*validation_split)+1: - 1]
-            pass
         else:
             training_df = data_df[data_df.Training == True]
             validation_df = data_df[data_df.Validation == True]
@@ -65,10 +63,13 @@ class AutoEncoderTextModel():
         return sentences
 
     def parse_str_labels(self, str_labels):
+        if type(str_labels) != str:
+            return []
         labels = list(map(str.strip, str_labels.split(",")))
         return labels
 
-    def pad_list_of_lists(self, array, fill_value=0.0, shape=()):
+    def pad_list_of_lists(self, array, fill_value=0.0, shape=(), debug=False):
+
         sent_lens = []
         word_lens =  []
 
@@ -82,20 +83,18 @@ class AutoEncoderTextModel():
         max_words = max(word_lens)
         avg_sents = np.mean(sent_lens)
         avg_words = np.mean(word_lens)
-        most_common_sents = Counter(sent_lens).most_common(20)
-        most_common_words = Counter(word_lens).most_common(20)
+        most_common_sents = Counter(sent_lens).most_common(25)
+        most_common_words = Counter(word_lens).most_common(25)
+        most_common_sents = max(list(zip(*most_common_sents))[0]) + 40
+        most_common_words = max(list(zip(*most_common_words))[0]) + 40
 
-        print("Max sentences:", max_sents)
-        print("Max words:", max_words)
-
-        print("Avg sentences:", avg_sents)
-        print("Avg words:", avg_words)
-
-        most_common_sents = max(list(zip(*most_common_sents))[0]) + 20
-        most_common_words = max(list(zip(*most_common_words))[0]) + 20
-
-        print("Most common sentences:", most_common_sents)
-        print("Most common words:", most_common_words)
+        if debug:
+            print("Max sentences:", max_sents)
+            print("Max words:", max_words)
+            print("Avg sentences:", avg_sents)
+            print("Avg words:", avg_words)
+            print("Most common sentences:", most_common_sents)
+            print("Most common words:", most_common_words)
 
         shape = (batch_size, most_common_sents, most_common_words)
         result = np.full(shape, fill_value)
@@ -113,67 +112,41 @@ class AutoEncoderTextModel():
         overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
         plot_data = self.vectorizer.fit(data["Plot"].apply(self.get_sentences).values)
         subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
-        self.sentence_model, self.model = self.get_model()
         return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(plot_data), self.pad_list_of_lists(subtitles_data)
 
 
-    def get_model(self):
+    def get_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
 
-        print("Vocabulary Size:",vectorizer.get_vocabulary_size())
+        print("Vocabulary Size:",self.vectorizer.get_vocabulary_size())
 
-        overview_input = Input(shape=(None, None), dtype='int64', name="OverviewInput")
-        plot_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
 
-        embedded_sentence = Embedding(vectorizer.get_vocabulary_size(), 300, trainable=True, name="Embedding")(sentence_input)
-        spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
-        cnn_sentence = Conv1D(64, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
+        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
+        spatial_dropout_sentence = SpatialDropout1D(0.25, name="SpatialDropoutSentence")(embedded_sentence)
+        cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
-        sentence_encoding = Bidirectional(LSTM(500))(max_pool_sentence)
+        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
         sentence_model = Model(sentence_input, sentence_encoding)
 
         segment_time_distributed = TimeDistributed(sentence_model, name="TimeDistributedSegment")
-        segment_cnn = Conv1D(172, 2, padding="same", activation="relu", name="SegmentConv1D")
-        segment_max_pool = MaxPooling1D(pool_size=3, name="SegementMaxPool1D")
-
-        segment_cnn_2 = Conv1D(172, 5, padding="same", activation="relu", name="Segment2Conv1D")
+        segment_cnn_2 = Conv1D(number_of_labels, 5, padding="same", activation="relu", name="Segment2Conv1D")
         segment_max_pool_2 = MaxPooling1D(pool_size=3, name = "Segment2MaxPool1D")
-
-        overview_time_distributed = segment_time_distributed(overview_input)
-        overview_cnn = segment_cnn(overview_time_distributed)
-        overview_maxpool = segment_max_pool(overview_cnn)
-
-        plot_time_distributed = segment_time_distributed(plot_input)
-        plot_cnn = segment_cnn(plot_time_distributed)
-        plot_maxpool = segment_max_pool(plot_cnn)
 
         subtitles_timedistributed = segment_time_distributed(subtitles_input)
         subtitles_cnn = segment_cnn_2(subtitles_timedistributed)
-        subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
+        subtitles_encoding_pre_attention = segment_max_pool_2(subtitles_cnn)
 
-        overview_dropout = SpatialDropout1D(0.40)(overview_maxpool)
-        overview_pre_attention_output = Dense(172, name="OverviewPreAttnOutput")(overview_dropout)
+        subtitles_dropout = SpatialDropout1D(0.40, name="SubtitlesDropout")(subtitles_encoding_pre_attention)
+        subtitles_pre_attention_output = Dense(number_of_labels, name="SubtitlesPreAttnOutput")(subtitles_dropout)
 
-        plot_dropout = SpatialDropout1D(0.40)(plot_maxpool)
-        plot_pre_attention_output = Dense(172, name="PlotPreAttnOutput")(plot_dropout)
-
-        subtitles_dropout = SpatialDropout1D(0.40, name="SubtitlesDropout")(subtitles_maxpool)
-        subtitles_pre_attention_output = Dense(172, name="SubtitlesPreAttnOutput")(subtitles_dropout)
-
-        attention_overview = AdditiveAttention(name="OverviewAttention")([overview_pre_attention_output, overview_maxpool])
-        attention_plot = AdditiveAttention(name="PlotAttention")([plot_pre_attention_output, plot_maxpool])
-        attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
-
-        overview_output = GlobalAveragePooling1D(name="GlobalAvgPoolOverview")(attention_overview)
-        plot_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_plot)
+        attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_encoding_pre_attention])
         subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
 
-        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([overview_output, plot_output, subtitles_output])
-        dropput = Dropout(0.40)(concat_output)
-        output = Dense(172, activation="sigmoid", name="Output")(dropput)
+        dropput = Dropout(0.40)(subtitles_output)
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
 
-        model = Model([overview_input, plot_input, subtitles_input], output)
+        model = Model(subtitles_input, output)
 
         model.compile(loss='binary_crossentropy',
                       optimizer='adamax',
@@ -183,19 +156,22 @@ class AutoEncoderTextModel():
         print(model.summary())
         self.sentence_model = sentence_model
         self.model = model
-        if self.load_weights:
+        if load_weights:
             self.sentence_model.load_weights("data/weights/sentence_model.h5")
             self.model.load_weights("data/weights/model.h5")
             self.vectorizer.load("data/weights/vectorizer.dat")
         return sentence_model, model
 
     def fit(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10):
+        print("Pre-processing training data...")
         overview_input, plot_input, subtitles_input = self.preprocess(data)
+        print("Pre-processing validation data...")
         overview_validation_input, plot_validation_input, subtitles_validation_input = self.preprocess(validation_data)
+        self.sentence_model, self.model = self.get_model(load_weights=self.load_weights)
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
-        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.4f}_precision_{precision:.4f}-recall_{recall:.4f}-auc_{auc:.4f}.ckpt"
+        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-val_accuracy_{val_accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
 
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
                                                          save_weights_only=True,
@@ -229,11 +205,8 @@ class AutoEncoderTextModel():
 if __name__ == "__main__":
 
     vectorizer = MultiVectorizer()
-    auto_encoder_text = AutoEncoderTextModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data.xlsx")
-    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=200, batch_size=4)
+    auto_encoder_text = GenrePredictionModel(vectorizer=vectorizer)
+    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data_lots.xlsx")
+    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=1200, batch_size=70)
 
     print("Done")
-
-    #auto_encoder_text.fit(X, y)
-
