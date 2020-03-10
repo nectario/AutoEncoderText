@@ -27,6 +27,8 @@ class GenrePredictionModel():
     def load_data(self, file_path, rows=None, validation_split=None):
         data_df = pd.read_excel(file_path, nrows=rows)
         data_df = data_df[data_df.Exclude == False]
+        data_df.replace("--", ", ", inplace=True)
+        data_df.replace("vislted", "visited", inplace=True)
 
         if validation_split is not None:
             data_df = data_df[data_df.Training == True].reset_index()
@@ -46,6 +48,8 @@ class GenrePredictionModel():
 
         with open("data/genres.pickle", "rb") as f:
             self.genres = pickle.load(f)
+
+        print(self.genres)
 
         mlb = MultiLabelBinarizer(classes=self.genres)
 
@@ -186,6 +190,70 @@ class GenrePredictionModel():
             self.vectorizer.load("data/weights/vectorizer.dat")
         return sentence_model, model
 
+
+    def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=172):
+
+        print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
+
+        plot_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
+        subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
+        sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
+
+        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
+        spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
+        cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
+        max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
+        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
+        sentence_model = Model(sentence_input, sentence_encoding)
+
+        segment_time_distributed = TimeDistributed(sentence_model, name="TimeDistributedSegment")
+        segment_cnn = Conv1D(number_of_labels, 2, padding="same", activation="relu", name="SegmentConv1D")
+        segment_max_pool = MaxPooling1D(pool_size=3, name="SegementMaxPool1D")
+
+        segment_cnn_2 = Conv1D(number_of_labels, 5, padding="same", activation="relu", name="Segment2Conv1D")
+        segment_max_pool_2 = MaxPooling1D(pool_size=3, name="Segment2MaxPool1D")
+
+        plot_time_distributed = segment_time_distributed(plot_input)
+        plot_cnn = segment_cnn(plot_time_distributed)
+        plot_maxpool = segment_max_pool(plot_cnn)
+
+        subtitles_timedistributed = segment_time_distributed(subtitles_input)
+        subtitles_cnn = segment_cnn_2(subtitles_timedistributed)
+        subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
+
+        plot_dropout = SpatialDropout1D(0.40)(plot_maxpool)
+        plot_pre_attention_output = Dense(number_of_labels, name="PlotPreAttnOutput")(plot_dropout)
+
+        subtitles_dropout = SpatialDropout1D(0.40, name="SubtitlesDropout")(subtitles_maxpool)
+        subtitles_pre_attention_output = Dense(number_of_labels, name="SubtitlesPreAttnOutput")(subtitles_dropout)
+
+        attention_plot = AdditiveAttention(name="PlotAttention")([plot_pre_attention_output, plot_maxpool])
+        attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
+
+
+        plot_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_plot)
+        subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
+
+        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([plot_output, subtitles_output])
+        dropput = Dropout(0.40)(concat_output)
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
+
+        model = Model([plot_input, subtitles_input], output)
+
+        model.compile(loss='binary_crossentropy',
+                      optimizer='adamax',
+                      metrics=self.METRICS)
+
+        print(sentence_model.summary())
+        print(model.summary())
+        self.sentence_model = sentence_model
+        self.model = model
+        if self.load_weights:
+            self.sentence_model.load_weights("data/weights/sentence_model.h5")
+            self.model.load_weights("data/weights/model.h5")
+            self.vectorizer.load("data/weights/vectorizer.dat")
+        return sentence_model, model
+
     def get_subtitle_model(self, embedding_size=300, lstm_output_size=600, number_of_labels=172):
 
         print("Vocabulary Size:",self.vectorizer.get_vocabulary_size())
@@ -242,7 +310,7 @@ class GenrePredictionModel():
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
-        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-val_accuracy_{val_accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
+        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
 
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
                                                          save_weights_only=True,
@@ -275,9 +343,9 @@ class GenrePredictionModel():
 
 if __name__ == "__main__":
 
-    vectorizer = MultiVectorizer()
-    auto_encoder_text = GenrePredictionModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data_lots.xlsx", rows=1500, validation_split=0.20)
-    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=1200, batch_size=10)
+    vectorizer = MultiVectorizer(glove_path="data/glove/glove.42B.300d.txt")
+    genre_prediction = GenrePredictionModel(vectorizer=vectorizer)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", rows=1000, validation_split=0.20)
+    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=10)
 
     print("Done")

@@ -8,7 +8,7 @@ import spacy
 from spacy.lang.en import English
 from common.data_utils import convert_to_string
 from orderedset import OrderedSet
-
+from spellchecker import SpellChecker
 
 class MultiVectorizer():
 
@@ -103,8 +103,9 @@ class MultiVectorizer():
             x_tokens = self.fit_text(X)
 
         self.vocabulary.filter_extremes(no_below=self.mi_occur, no_above=1.0, keep_tokens=self.reserved)
-
+        unknown_words = []
         if self.glove:
+            spell = SpellChecker()
             print("Vocabulary Size:",self.get_vocabulary_size())
             self.embedding_matrix = np.zeros((self.get_vocabulary_size(), self.embedding_size))
             for word, i in tqdm(self.vocabulary.token2id.items()):
@@ -117,9 +118,16 @@ class MultiVectorizer():
                 else:
                     embedding_value = self.embedding_word_vector.get(word)
                     if embedding_value is None:
-                        embedding_value = self.embedding_word_vector.get("<UNK>")
+                        print("Will replace word:", word, spell.correction(word))
+                        embedding_value = self.embedding_word_vector.get(spell.correction(word))
+                        if embedding_value is None:
+                            embedding_value = self.embedding_word_vector.get("<UNK>")
+                            #print("Unknown word:",word)
+                            unknown_words.append(word)
+
                 if embedding_value is not None:
                     self.embedding_matrix[i] = embedding_value
+        print("Number of unknown words:",len(unknown_words))
         return  self.transform(x_tokens)
 
     def fit_text(self, X):
