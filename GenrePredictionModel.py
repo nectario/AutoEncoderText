@@ -83,10 +83,10 @@ class GenrePredictionModel():
         max_words = max(word_lens)
         avg_sents = np.mean(sent_lens)
         avg_words = np.mean(word_lens)
-        most_common_sents = Counter(sent_lens).most_common(25)
-        most_common_words = Counter(word_lens).most_common(25)
-        most_common_sents = max(list(zip(*most_common_sents))[0]) + 40
-        most_common_words = max(list(zip(*most_common_words))[0]) + 40
+        most_common_sents = Counter(sent_lens).most_common(20)
+        most_common_words = Counter(word_lens).most_common(20)
+        most_common_sents = max(list(zip(*most_common_sents))[0]) + 20
+        most_common_words = max(list(zip(*most_common_words))[0]) + 20
 
         if debug:
             print("Max sentences:", max_sents)
@@ -114,7 +114,7 @@ class GenrePredictionModel():
         subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
         return self.pad_list_of_lists(subtitles_data) #self.pad_list_of_lists(overview_data), self.pad_list_of_lists(plot_data),
 
-    def get_three_input_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
+    def get_three_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=172):
 
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
 
@@ -186,7 +186,7 @@ class GenrePredictionModel():
             self.vectorizer.load("data/weights/vectorizer.dat")
         return sentence_model, model
 
-    def get_subtitle_model(self, load_weights=False, embedding_size=300, lstm_output_size=600, number_of_labels=172):
+    def get_subtitle_model(self, embedding_size=300, lstm_output_size=600, number_of_labels=172):
 
         print("Vocabulary Size:",self.vectorizer.get_vocabulary_size())
 
@@ -227,7 +227,7 @@ class GenrePredictionModel():
         print(model.summary())
         self.sentence_model = sentence_model
         self.model = model
-        if load_weights:
+        if self.load_weights:
             self.sentence_model.load_weights("data/weights/sentence_model.h5")
             self.model.load_weights("data/weights/model.h5")
             self.vectorizer.load("data/weights/vectorizer.dat")
@@ -238,7 +238,7 @@ class GenrePredictionModel():
         subtitles_input = self.preprocess(data)
         print("Pre-processing validation data...")
         subtitles_validation_input = self.preprocess(validation_data)
-        self.sentence_model, self.model = self.get_subtitle_model(load_weights=self.load_weights)
+        self.sentence_model, self.model = self.get_subtitle_model()
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
@@ -277,7 +277,7 @@ if __name__ == "__main__":
 
     vectorizer = MultiVectorizer()
     auto_encoder_text = GenrePredictionModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data_lots.xlsx")
-    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=1200, batch_size=70)
+    training_data_df, validation_data_df = auto_encoder_text.load_data("data/film_data_lots.xlsx", rows=1500, validation_split=0.20)
+    auto_encoder_text.fit(training_data_df, auto_encoder_text.training_labels, validation_data=validation_data_df, validation_labels = auto_encoder_text.validation_labels, epochs=1200, batch_size=10)
 
     print("Done")
