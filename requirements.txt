@@ -1,0 +1,14 @@
+gensim
+tensorflow
+fuzzywuzzy
+numpy
+pandas
+matplotlib
+nltk
+spacy
+sklearn
+tqdm
+xlsxwriter
+openpyxl
+orderedset
+omdbapi
