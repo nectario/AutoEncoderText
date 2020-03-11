@@ -46,10 +46,7 @@ class GenrePredictionModel():
         training_df.loc[:,"Labels"] = training_df["Genres"].apply(self.parse_str_labels)
         validation_df.loc[:,"Labels"] = validation_df["Genres"].apply(self.parse_str_labels)
 
-        with open("data/genres.pickle", "rb") as f:
-            self.genres = pickle.load(f)
-
-        print(self.genres)
+        self.genres = self.load_current_genres(file_path="data/current_genre_reduced.xlsx")
 
         mlb = MultiLabelBinarizer(classes=self.genres)
 
@@ -60,6 +57,15 @@ class GenrePredictionModel():
         self.validation_labels =  validation_binary_labels
 
         return training_df, validation_df
+
+    def load_current_genres(self, file_path, load_original=False):
+        if load_original:
+            with open("data/genres.pickle", "rb") as f:
+                genres = pickle.load(f)
+                return genres
+        current_genres_df = pd.read_excel(file_path)
+        genres = current_genres_df["Genres"].tolist()
+        return genres
 
     def get_sentences(self, text):
         text = str(text if type(text) == str else "")
@@ -113,10 +119,10 @@ class GenrePredictionModel():
         return result
 
     def preprocess(self, data):
-        #overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
+        overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
         #plot_data = self.vectorizer.fit(data["Plot"].apply(self.get_sentences).values)
         subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
-        return self.pad_list_of_lists(subtitles_data) #self.pad_list_of_lists(overview_data), self.pad_list_of_lists(plot_data),
+        return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(subtitles_data) #self.pad_list_of_lists(plot_data),
 
     def get_three_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=172):
 
@@ -129,7 +135,7 @@ class GenrePredictionModel():
 
         embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
-        cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
+        cnn_sentence = Conv1D(220, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
         sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
         sentence_model = Model(sentence_input, sentence_encoding)
@@ -191,11 +197,11 @@ class GenrePredictionModel():
         return sentence_model, model
 
 
-    def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=172):
+    def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=130):
 
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
 
-        plot_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
+        overview_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
 
@@ -203,7 +209,9 @@ class GenrePredictionModel():
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
         cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
-        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
+        lstm_1 = Bidirectional(LSTM(lstm_output_size, return_sequences=True))(max_pool_sentence)
+        dropout = Dropout(0.3)(lstm_1)
+        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(dropout)
         sentence_model = Model(sentence_input, sentence_encoding)
 
         segment_time_distributed = TimeDistributed(sentence_model, name="TimeDistributedSegment")
@@ -213,32 +221,31 @@ class GenrePredictionModel():
         segment_cnn_2 = Conv1D(number_of_labels, 5, padding="same", activation="relu", name="Segment2Conv1D")
         segment_max_pool_2 = MaxPooling1D(pool_size=3, name="Segment2MaxPool1D")
 
-        plot_time_distributed = segment_time_distributed(plot_input)
-        plot_cnn = segment_cnn(plot_time_distributed)
-        plot_maxpool = segment_max_pool(plot_cnn)
+        overview_time_distributed = segment_time_distributed(overview_input)
+        overview_cnn = segment_cnn(overview_time_distributed)
+        overview_maxpool = segment_max_pool(overview_cnn)
 
         subtitles_timedistributed = segment_time_distributed(subtitles_input)
         subtitles_cnn = segment_cnn_2(subtitles_timedistributed)
         subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
 
-        plot_dropout = SpatialDropout1D(0.40)(plot_maxpool)
-        plot_pre_attention_output = Dense(number_of_labels, name="PlotPreAttnOutput")(plot_dropout)
+        overview_dropout = SpatialDropout1D(0.40)(overview_maxpool)
+        overview_pre_attention_output = Dense(number_of_labels, name="PlotPreAttnOutput")(overview_dropout)
 
         subtitles_dropout = SpatialDropout1D(0.40, name="SubtitlesDropout")(subtitles_maxpool)
         subtitles_pre_attention_output = Dense(number_of_labels, name="SubtitlesPreAttnOutput")(subtitles_dropout)
 
-        attention_plot = AdditiveAttention(name="PlotAttention")([plot_pre_attention_output, plot_maxpool])
+        attention_overview = AdditiveAttention(name="PlotAttention")([overview_pre_attention_output, overview_maxpool])
         attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
 
-
-        plot_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_plot)
+        overview_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_overview)
         subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
 
-        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([plot_output, subtitles_output])
+        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([overview_output, subtitles_output])
         dropput = Dropout(0.40)(concat_output)
         output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
 
-        model = Model([plot_input, subtitles_input], output)
+        model = Model([overview_input, subtitles_input], output)
 
         model.compile(loss='binary_crossentropy',
                       optimizer='adamax',
@@ -262,10 +269,12 @@ class GenrePredictionModel():
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
 
         embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
-        spatial_dropout_sentence = SpatialDropout1D(0.25, name="SpatialDropoutSentence")(embedded_sentence)
+        spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
         cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
-        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
+        lstm_1 = Bidirectional(LSTM(lstm_output_size, return_sequences=True))(max_pool_sentence)
+        dropout = Dropout(0.35)(lstm_1)
+        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(dropout)
         sentence_model = Model(sentence_input, sentence_encoding)
 
         segment_time_distributed = TimeDistributed(sentence_model, name="TimeDistributedSegment")
@@ -303,10 +312,10 @@ class GenrePredictionModel():
 
     def fit(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10):
         print("Pre-processing training data...")
-        subtitles_input = self.preprocess(data)
+        overview_input, subtitles_input = self.preprocess(data)
         print("Pre-processing validation data...")
-        subtitles_validation_input = self.preprocess(validation_data)
-        self.sentence_model, self.model = self.get_subtitle_model()
+        overview_validation_input, subtitles_validation_input = self.preprocess(validation_data)
+        self.sentence_model, self.model = self.get_two_input_model(number_of_labels=len(self.genres))
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
@@ -316,7 +325,7 @@ class GenrePredictionModel():
                                                          save_weights_only=True,
                                                          verbose=1)
 
-        self.model.fit(subtitles_input, labels, validation_data=(subtitles_validation_input, validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
+        self.model.fit([overview_input, subtitles_input], labels, validation_data=([overview_validation_input, subtitles_validation_input], validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
 
 
     class CallbackActions(Callback):
@@ -343,9 +352,9 @@ class GenrePredictionModel():
 
 if __name__ == "__main__":
 
-    vectorizer = MultiVectorizer(glove_path="data/glove/glove.42B.300d.txt")
+    vectorizer = MultiVectorizer() #glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer)
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", rows=1000, validation_split=0.20)
-    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=10)
+    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2)
 
     print("Done")

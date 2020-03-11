@@ -8,7 +8,8 @@ import spacy
 from spacy.lang.en import English
 from common.data_utils import convert_to_string
 from orderedset import OrderedSet
-from spellchecker import SpellChecker
+#from spellchecker import Spellchecker
+import pandas as pd
 
 class MultiVectorizer():
 
@@ -105,7 +106,7 @@ class MultiVectorizer():
         self.vocabulary.filter_extremes(no_below=self.mi_occur, no_above=1.0, keep_tokens=self.reserved)
         unknown_words = []
         if self.glove:
-            spell = SpellChecker()
+            #spell = Spellchecker()
             print("Vocabulary Size:",self.get_vocabulary_size())
             self.embedding_matrix = np.zeros((self.get_vocabulary_size(), self.embedding_size))
             for word, i in tqdm(self.vocabulary.token2id.items()):
@@ -118,16 +119,17 @@ class MultiVectorizer():
                 else:
                     embedding_value = self.embedding_word_vector.get(word)
                     if embedding_value is None:
-                        print("Will replace word:", word, spell.correction(word))
-                        embedding_value = self.embedding_word_vector.get(spell.correction(word))
+                        embedding_value = self.embedding_word_vector.get(self.correct_word(word))
                         if embedding_value is None:
-                            embedding_value = self.embedding_word_vector.get("<UNK>")
-                            #print("Unknown word:",word)
                             unknown_words.append(word)
+                            embedding_value = self.embedding_word_vector.get("<UNK>")
 
                 if embedding_value is not None:
                     self.embedding_matrix[i] = embedding_value
         print("Number of unknown words:",len(unknown_words))
+        unknown_words_df = pd.DataFrame()
+        unknown_words_df["Unknown Words"] = unknown_words
+        unknown_words_df.to_excel("data/unknown_words.xlsx", index=False)
         return  self.transform(x_tokens)
 
     def fit_text(self, X):
@@ -140,6 +142,9 @@ class MultiVectorizer():
                 x_tokens.append(word_str_tokens)
                 self.vocabulary.add_documents(x_tokens)
         return x_tokens
+
+    def correct_word(self, word):
+        return word
 
     def transform(self, X):
         return self.transform_list_of_list(X)

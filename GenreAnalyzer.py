@@ -15,7 +15,7 @@ class GenreAnalyzer():
     Class to perform genre analysis given the film/show file, for example, film_data.csv. This includes counting the number of genre tags, finding subgenres
     based on text similarity or word emeddings similarity.
     """
-    def __init__(self, film_data=None, episodes_data=None, dbpedia_filepath=None, genre_colum="Genres", generate_genre_count_file=True):
+    def __init__(self, film_data=None, episodes_data=None, dbpedia_filepath=None, genre_colum="Genres", generate_genre_count_file=True, current_genres=None):
 
         film_data = film_data[film_data.Exclude == False]
         self.dbpedia_film_data_df = None
@@ -31,6 +31,16 @@ class GenreAnalyzer():
 
         if self.wikidata_film_data_df is not None:
             self.wikidata_genre_count_map, self.wikidata_film_genre_count_df = self.count_genres(data_df=self.wikidata_film_data_df, genre_column=genre_colum, return_dataframe=True)
+
+        genre_count = []
+        for genre in current_genres:
+            count = self.wikidata_genre_count_map[genre]
+            genre_count.append(count)
+
+        curent_genre_count_df = pd.DataFrame(columns=["Genres", "Count"])
+        curent_genre_count_df["Genres"] = current_genres
+        curent_genre_count_df["Count"] = genre_count
+        curent_genre_count_df.to_excel("data/current_genre_count.xlsx", index=False)
 
         if self.wikidata_episodes_data_df is not None:
             self.wikidata_episodes_genre_count_map, self.wikidata_episodes_genre_count_df = self.count_genres(data_df=self.wikidata_episodes_data_df, genre_column=genre_colum, return_dataframe=True)
@@ -442,8 +452,10 @@ if __name__ == "__main__":
 
     film_data_df = pd.read_excel("data/film_data_lots.xlsx")
     #wikidata_episodes_data_df = pd.read_excel("data/open_sub_dump/episodes_data.xlsx")
+    with open("data/genres.pickle", "rb") as f:
+        genres = pickle.load(f)
 
-    genre_analyzer = GenreAnalyzer(film_data=film_data_df, genre_colum="Genres")
+    genre_analyzer = GenreAnalyzer(film_data=film_data_df, genre_colum="Genres", current_genres=genres)
     exit(0)
 
     with open('data/open_sub_dump/wikipedia_data_films', 'rb') as pickle_file:
