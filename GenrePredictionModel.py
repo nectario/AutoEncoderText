@@ -354,7 +354,7 @@ if __name__ == "__main__":
 
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", rows=500, validation_split=0.20)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
     genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2)
 
     print("Done")
