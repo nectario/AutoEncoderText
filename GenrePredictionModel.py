@@ -268,7 +268,7 @@ class GenrePredictionModel():
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
 
-        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
+        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding", weights=[self.vectorizer.embedding_matrix])(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
         cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
@@ -352,9 +352,9 @@ class GenrePredictionModel():
 
 if __name__ == "__main__":
 
-    vectorizer = MultiVectorizer() #glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
+    vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", rows=1000, validation_split=0.20)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx") #rows=1500, validation_split=0.20)
     genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2)
 
     print("Done")
