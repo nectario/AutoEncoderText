@@ -197,7 +197,7 @@ class GenrePredictionModel():
         return sentence_model, model
 
 
-    def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=130):
+    def get_two_input_model(self, embedding_size=300, lstm_output_size=400, number_of_labels=130):
 
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
 
@@ -207,7 +207,7 @@ class GenrePredictionModel():
 
         embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
-        cnn_sentence = Conv1D(256, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
+        cnn_sentence = Conv1D(220, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
         lstm_1 = Bidirectional(LSTM(lstm_output_size, return_sequences=True))(max_pool_sentence)
         dropout = Dropout(0.3)(lstm_1)
@@ -319,7 +319,7 @@ class GenrePredictionModel():
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
-        checkpoint_path = "data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
+        checkpoint_path = "D:/Development/data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
 
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
                                                          save_weights_only=True,
@@ -345,16 +345,16 @@ class GenrePredictionModel():
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.main_model.save_weights("data/weights/main_model.h5")
-            self.sentence_model.save_weights("data/weights/sentence_model.h5")
-            self.vectorizer.save("data/weights/vectorizer.dat")
+            self.main_model.save_weights("D:/Development/data/weights/main_model.h5")
+            self.sentence_model.save_weights("D:/Development\data/weights/sentence_model.h5")
+            self.vectorizer.save("D:/Development/data/weights/vectorizer.dat")
             return
 
 if __name__ == "__main__":
 
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
-    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx") # rows=150, validation_split=0.10)
+    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=4)
 
     print("Done")
