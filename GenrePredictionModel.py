@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 from collections import Counter
 from operator import itemgetter
 
@@ -28,6 +28,10 @@ class GenrePredictionModel():
             Recall(name='recall'),
             AUC(name='auc')
         ]
+
+        self.checkpoint_path = "D:/Development/data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
+        self.checkpoint_dir = os.path.dirname(self.checkpoint_path)
+        self.latest_weights = tf.train.latest_checkpoint(self.checkpoint_dir)
 
     def load_data(self, file_path, rows=None, validation_split=None):
         data_df = pd.read_excel(file_path, nrows=rows)
@@ -156,11 +160,15 @@ class GenrePredictionModel():
 
     def get_two_input_model(self, embedding_size=300, lstm_output_size=400, number_of_labels=130):
 
+        if self.load_weights:
+            self.vectorizer = self.vectorizer.load("D:/Development/data/weights/vectorizer.dat")
+
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
 
         overview_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
+
 
         embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
@@ -214,8 +222,7 @@ class GenrePredictionModel():
         self.model = model
         if self.load_weights:
             self.sentence_model.load_weights("D:/Development/data/weights/sentence_model.h5")
-            self.model.load_weights("D:/Development/data/weights/main_model.h5")
-            self.vectorizer.load("D:/Development/data/weights/vectorizer.dat")
+            self.model.load_weights(self.latest_weights)  #("D:/Development/data/weights/main_model.h5")
         return sentence_model, model
 
 
@@ -229,9 +236,9 @@ class GenrePredictionModel():
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
-        checkpoint_path = "D:/Development/data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
 
-        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path,
                                                          save_weights_only=True,
                                                          verbose=1)
 
@@ -240,6 +247,8 @@ class GenrePredictionModel():
     def evaluate(self, data=None, binary_labels=None, file_path=None, genre_column="Genre Labels", batch_size=2, output_vectors=False, data_type="", load_encoded_data=False,
                  save_encoded_data=False):
         binary_predictions = None
+
+        self.sentence_model, self.model = self.get_two_input_model(number_of_labels=len(self.genres))
 
         if file_path is not None:
             predictions_df = pd.read_excel(file_path)
@@ -326,6 +335,9 @@ class GenrePredictionModel():
         predictions_df["Additional Labels"] = np.array(predicted_num_labels) - np.array(num_labels_matching)
         predictions_df["Precision"] = precision
         predictions_df["Recall"] = recall
+
+        predictions_df["Micro Precision"] = precision["micro"]
+        predictions_df["Micro Recall"] = recall["micro"]
 
         return predictions_df
 
@@ -432,7 +444,7 @@ class GenrePredictionModel():
 
         def on_epoch_end(self, epoch, logs={}):
             self.main_model.save_weights("D:/Development/data/weights/main_model.h5")
-            self.sentence_model.save_weights("D:/Development\data/weights/sentence_model.h5")
+            self.sentence_model.save_weights("D:/Development/data/weights/sentence_model.h5")
             self.vectorizer.save("D:/Development/data/weights/vectorizer.dat")
             return
 
@@ -441,13 +453,13 @@ if __name__ == "__main__":
     evaluate = True
     train = False
     load_weights = True
-    
+
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
     if evaluate:
-        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels)
+        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
 
     if train:
         genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=3)
