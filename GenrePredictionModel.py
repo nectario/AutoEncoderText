@@ -277,7 +277,7 @@ class GenrePredictionModel():
             labels_matching = len(genre_labels.intersection(genre_predictions))
             num_labels_matching.append(labels_matching)
 
-            if genre_labels == genre_predictions:
+            if genre_labels == genre_predictions and len(genre_predictions) > 0:
                 exact_match.append(True)
             else:
                 exact_match.append(False)
@@ -382,8 +382,8 @@ class GenrePredictionModel():
             binary_predictions = []
 
             for i, prediction in enumerate(raw_predictions):
-                indexes = [i for i, x in enumerate(prediction) if x >= 0.50]
-                binary_prediction = [1 if x >= 0.50 else 0 for i, x in enumerate(prediction)]
+                indexes = [i for i, x in enumerate(prediction) if x >= 0.40]
+                binary_prediction = [1 if x >= 0.40 else 0 for i, x in enumerate(prediction)]
 
                 if len(indexes) > 0:
                     pred_text = itemgetter(*indexes)(self.genres)
