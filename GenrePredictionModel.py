@@ -81,6 +81,8 @@ class GenrePredictionModel():
         return sentences
 
     def parse_str_labels(self, str_labels):
+        if type(str_labels) == list:
+            return str_labels
         if type(str_labels) != str:
             return []
         labels = list(map(str.strip, str_labels.split(",")))
@@ -379,7 +381,7 @@ class GenrePredictionModel():
             prediction_probs = []
             binary_predictions = []
 
-            for i, prediction in enumerate(tqdm(raw_predictions)):
+            for i, prediction in enumerate(raw_predictions):
                 indexes = [i for i, x in enumerate(prediction) if x >= 0.50]
                 binary_prediction = [1 if x >= 0.50 else 0 for i, x in enumerate(prediction)]
 
@@ -466,8 +468,8 @@ if __name__ == "__main__":
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
     if evaluate:
-        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
-
+        evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
+        evaluation_df.to_excel("data/new_evaluation.xlsx", index=False)
     if train:
         genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=4)
 
