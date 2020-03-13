@@ -1,5 +1,3 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
 from collections import Counter
 from operator import itemgetter
 
@@ -134,36 +132,9 @@ class GenrePredictionModel():
     def preprocess(self, data, save_encoded_data=False):
         overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
         subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
-<<<<<<< Updated upstream
         if save_encoded_data:
             self.save_pickle_data(overview_data, file_path="data/overview_encoded_data.dat")
             self.save_pickle_data(overview_data, file_path="data/subtitles_encoded_data.dat")
-=======
-        return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(subtitles_data) #self.pad_list_of_lists(plot_data),
-
-    def get_three_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=172):
-
-        print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
-
-        overview_input = Input(shape=(None, None), dtype='int64', name="OverviewInput")
-        plot_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
-        subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
-        sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
-        
-        if self.load_weights:
-           self.vectorizer.load("data/weights/vectorizer.dat")
-
-        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
-        spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
-        cnn_sentence = Conv1D(220, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
-        max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
-        sentence_encoding = Bidirectional(LSTM(lstm_output_size))(max_pool_sentence)
-        sentence_model = Model(sentence_input, sentence_encoding)
-
-        segment_time_distributed = TimeDistributed(sentence_model, name="TimeDistributedSegment")
-        segment_cnn = Conv1D(number_of_labels, 2, padding="same", activation="relu", name="SegmentConv1D")
-        segment_max_pool = MaxPooling1D(pool_size=3, name="SegementMaxPool1D")
->>>>>>> Stashed changes
 
         return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(subtitles_data)
 
@@ -171,50 +142,8 @@ class GenrePredictionModel():
         if file_path is None:
             raise ValueError("Please specify file path in save_pickle_data()!")
 
-<<<<<<< Updated upstream
         with open(file_path, "wb") as handle:
             pickle.dump(overview_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-=======
-        subtitles_timedistributed = segment_time_distributed(subtitles_input)
-        subtitles_cnn = segment_cnn_2(subtitles_timedistributed)
-        subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
-
-        overview_dropout = SpatialDropout1D(0.40)(overview_maxpool)
-        overview_pre_attention_output = Dense(number_of_labels, name="OverviewPreAttnOutput")(overview_dropout)
-
-        plot_dropout = SpatialDropout1D(0.40)(plot_maxpool)
-        plot_pre_attention_output = Dense(number_of_labels, name="PlotPreAttnOutput")(plot_dropout)
-
-        subtitles_dropout = SpatialDropout1D(0.40, name="SubtitlesDropout")(subtitles_maxpool)
-        subtitles_pre_attention_output = Dense(number_of_labels, name="SubtitlesPreAttnOutput")(subtitles_dropout)
-
-        attention_overview = AdditiveAttention(name="OverviewAttention")([overview_pre_attention_output, overview_maxpool])
-        attention_plot = AdditiveAttention(name="PlotAttention")([plot_pre_attention_output, plot_maxpool])
-        attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
-
-        overview_output = GlobalAveragePooling1D(name="GlobalAvgPoolOverview")(attention_overview)
-        plot_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_plot)
-        subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
-
-        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([overview_output, plot_output, subtitles_output])
-        dropput = Dropout(0.40)(concat_output)
-        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
-
-        model = Model([overview_input, plot_input, subtitles_input], output)
-
-        model.compile(loss='binary_crossentropy',
-                      optimizer='adamax',
-                      metrics=self.METRICS)
-
-        print(sentence_model.summary())
-        print(model.summary())
-        self.sentence_model = sentence_model
-        self.model = model
-        if self.load_weights:
-            self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights("data/weights/model.h5")
-        return sentence_model, model
->>>>>>> Stashed changes
 
     def load_pickle_data(self, file_path):
         with open(file_path, 'rb') as pickle_file:
@@ -228,9 +157,6 @@ class GenrePredictionModel():
         overview_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
-        
-        if self.load_weights:
-            self.vectorizer.load("data/weights/vectorizer.dat")
 
         embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
@@ -283,41 +209,12 @@ class GenrePredictionModel():
         self.sentence_model = sentence_model
         self.model = model
         if self.load_weights:
-<<<<<<< Updated upstream
             self.sentence_model.load_weights("D:/Development/data/weights/sentence_model.h5")
             self.model.load_weights("D:/Development/data/weights/main_model.h5")
             self.vectorizer.load("D:/Development/data/weights/vectorizer.dat")
-=======
-            self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights("data/weights/main_model.h5")
->>>>>>> Stashed changes
         return sentence_model, model
 
 
-<<<<<<< Updated upstream
-=======
-        attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_encoding_pre_attention])
-        subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
-
-        dropput = Dropout(0.40)(subtitles_output)
-        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
-
-        model = Model(subtitles_input, output)
-
-        model.compile(loss='binary_crossentropy',
-                      optimizer='adamax',
-                      metrics=self.METRICS)
-
-        print(sentence_model.summary())
-        print(model.summary())
-        self.sentence_model = sentence_model
-        self.model = model
-        if self.load_weights:
-            self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights("data/weights/main_model.h5")
-            self.vectorizer.load("data/weights/vectorizer.dat")
-        return sentence_model, model
->>>>>>> Stashed changes
 
     def fit(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10):
         print("Pre-processing training data...")
@@ -328,13 +225,13 @@ class GenrePredictionModel():
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
 
-        checkpoint_path = "D:/Development/data/weights/checkpoints/cp-epoch_{epoch:02d}.ckpt"
+        checkpoint_path = "D:/Development/data/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
 
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
                                                          save_weights_only=True,
                                                          verbose=1)
 
-        self.model.fit([overview_input, subtitles_input], labels, validation_data=([overview_validation_input, subtitles_validation_input], validation_labels), epochs=epochs, callbacks=[callback_actions], batch_size=batch_size)
+        self.model.fit([overview_input, subtitles_input], labels, validation_data=([overview_validation_input, subtitles_validation_input], validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
 
     def evaluate(self, data=None, file_path=None, genre_column="Genre Labels", batch_size=2, output_vectors=False, data_type="", load_encoded_data=False,
                  save_encoded_data=False):
@@ -502,14 +399,16 @@ class GenrePredictionModel():
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.main_model.save_weights("data/weights/main_model.h5")
-            self.sentence_model.save_weights("data/weights/sentence_model.h5")
-            self.vectorizer.save("data/weights/vectorizer.dat")
+            self.main_model.save_weights("D:/Development/data/weights/main_model.h5")
+            self.sentence_model.save_weights("D:/Development\data/weights/sentence_model.h5")
+            self.vectorizer.save("D:/Development/data/weights/vectorizer.dat")
             return
 
 if __name__ == "__main__":
-    vectorizer = MultiVectorizer(glove_path="data/glove/glove.840B.300d.txt")
-    genre_prediction = GenrePredictionModel(vectorizer=vectorizer)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
-    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=4)
+
+    vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
+    genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=True)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx") # rows=150, validation_split=0.10)
+    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=3)
+
     print("Done")

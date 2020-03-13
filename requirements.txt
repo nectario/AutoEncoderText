@@ -1,4 +1,5 @@
 gensim
+tensorflow
 fuzzywuzzy
 numpy
 pandas
