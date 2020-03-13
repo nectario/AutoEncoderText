@@ -283,10 +283,9 @@ class GenrePredictionModel():
             set_union = genre_labels.union(genre_predictions)
             set_intersection = genre_labels.intersection(genre_predictions)
 
-            accuracy.append(round(len(set_intersection) / len(set_union), 4) * 100)
+            accuracy.append(round(len(set_intersection) / (len(set_union) +np.e), 4) * 100 )
 
             diff = 0
-            print("Genre Predictions Length:", len(genre_predictions))
             if len(genre_predictions) > 0 and (len(genre_labels) < len(genre_predictions) or len(genre_predictions) < len(genre_labels)):
                 diff = len(set_union.difference(set_intersection))
             elif len(genre_predictions) > 0 and len(genre_labels) == len(genre_predictions):
@@ -304,13 +303,12 @@ class GenrePredictionModel():
 
         print("Exact Match:", sum(exact_match)/len(exact_match))
 
-        predictions_df.sort_values(by=["Exact Match", "Single Miss", "Double Miss"], ascending=False, inplace=True)
 
         precision = dict()
         recall = dict()
         average_precision = dict()
 
-        for i in range(len(predictions_df.shape[1])):
+        for i in range(predictions_df.shape[1]):
             precision[i], recall[i], _ = precision_recall_curve(binary_labels[:, i],
                                                                 binary_predictions[:, i])
             average_precision[i] = average_precision_score(binary_labels[:, i], binary_predictions[:, i])
@@ -337,6 +335,8 @@ class GenrePredictionModel():
 
         predictions_df["Micro Precision"] = precision["micro"]
         predictions_df["Micro Recall"] = recall["micro"]
+
+        predictions_df.sort_values(by=["Exact Match", "Single Miss", "Double Miss"], ascending=False, inplace=True)
 
         return predictions_df
 
@@ -370,7 +370,7 @@ class GenrePredictionModel():
             prediction_probs = []
             binary_predictions = []
 
-            for i, prediction in enumerate(raw_predictions):
+            for i, prediction in enumerate(tqdm(raw_predictions)):
                 indexes = [i for i, x in enumerate(prediction) if x >= 0.50]
                 binary_prediction = [1 if x >= 0.50 else 0 for i, x in enumerate(prediction)]
 
@@ -454,10 +454,10 @@ if __name__ == "__main__":
 
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", rows=10)
 
     if evaluate:
-        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=4)
+        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
 
     if train:
         genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=4)
