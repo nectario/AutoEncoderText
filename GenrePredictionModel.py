@@ -303,24 +303,29 @@ class GenrePredictionModel():
 
         print("Exact Match:", sum(exact_match)/len(exact_match))
 
-
         precision = dict()
         recall = dict()
         average_precision = dict()
 
-        for i in range(predictions_df.shape[1]):
-            precision[i], recall[i], _ = precision_recall_curve(binary_labels[:, i],
-                                                                binary_predictions[:, i])
-            average_precision[i] = average_precision_score(binary_labels[:, i], binary_predictions[:, i])
+        try:
+            binary_labels = np.array(binary_labels)
+            binary_predictions = np.array(binary_predictions)
+            for i in range(predictions_df.shape[1]):
+                precision[i], recall[i], _ = precision_recall_curve(binary_labels[:, i],
+                                                                    binary_predictions[:, i])
+                average_precision[i] = average_precision_score(binary_labels[:, i], binary_predictions[:, i])
 
-        # A "micro-average": quantifying score on all classes jointly
-        precision["micro"], recall["micro"], _ = precision_recall_curve(binary_labels.ravel(),
-                                                                        binary_predictions.ravel())
-        average_precision["micro"] = average_precision_score(binary_labels, binary_predictions,
-                                                             average="micro")
+            # A "micro-average": quantifying score on all classes jointly
+            precision["micro"], recall["micro"], _ = precision_recall_curve(binary_labels.ravel(),
+                                                                            binary_predictions.ravel())
+            average_precision["micro"] = average_precision_score(binary_labels, binary_predictions,
+                                                                 average="micro")
 
-        print('Average precision score, micro-averaged over all classes: {0:0.2f}'
-              .format(average_precision["micro"]))
+            print('Average precision score, micro-averaged over all classes: {0:0.2f}'
+                  .format(average_precision["micro"]))
+
+        except Exception:
+            print("Exception calucating precision/recall.")
 
         predictions_df["Exact Match"] = exact_match
         predictions_df["Single Miss"] = single_miss
@@ -330,11 +335,15 @@ class GenrePredictionModel():
         predictions_df["Predicted Num Labels"] = predicted_num_labels
         predictions_df["Num Labels Matching"] = num_labels_matching
         predictions_df["Additional Labels"] = np.array(predicted_num_labels) - np.array(num_labels_matching)
-        predictions_df["Precision"] = precision
-        predictions_df["Recall"] = recall
 
-        predictions_df["Micro Precision"] = precision["micro"]
-        predictions_df["Micro Recall"] = recall["micro"]
+        print()
+        print("Precision", precision)
+        print("Recall", recall)
+
+        print("-------")
+        print("Micro Precision",precision["micro"])
+        print("Micro Recall",recall["micro"])
+        print("Average Precision", average_precision)
 
         predictions_df.sort_values(by=["Exact Match", "Single Miss", "Double Miss"], ascending=False, inplace=True)
 
@@ -454,7 +463,7 @@ if __name__ == "__main__":
 
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", rows=10)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
     if evaluate:
         genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
