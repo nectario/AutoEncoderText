@@ -1,5 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
 from collections import Counter
 from operator import itemgetter
 
@@ -363,7 +362,7 @@ class GenrePredictionModel():
 
             X = [overview_encoded_data, subtitle_encoded_data]
 
-            raw_predictions = self.model.predict(X, batch_size=batch_size, use_multiprocessing=True, verbose=1)
+            raw_predictions = self.model.predict(X, batch_size=batch_size, verbose=1)
 
             print("Finished with raw predictions...")
 
@@ -401,11 +400,10 @@ class GenrePredictionModel():
             prediction_data_df["Prediction Probabilities"] = prediction_probs
             prediction_data_df = prediction_data_df.replace(to_replace="[", value="").replace(to_replace="]", value="").replace(to_replace="'", value="")
 
-            subtitles_output = self.model.get_layer("SubtitlesEncoding").output
-            encoded_data_model = Model(self.model.input, subtitles_output)
-
             if output_vectors:
                 if output_subtitle_vectors:
+                    subtitles_output = self.model.get_layer("GlobalAvgPoolSubitles").output
+                    encoded_data_model = Model(self.model.input, subtitles_output)
                     subtitles_vector = encoded_data_model.predict(X, use_multiprocessing=True, verbose=1, batch_size=batch_size)
                     print("Finished with subtitle vectors...")
 
@@ -459,7 +457,7 @@ if __name__ == "__main__":
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
     if evaluate:
-        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
+        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=4)
 
     if train:
         genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=4)
