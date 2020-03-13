@@ -1,3 +1,5 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 from collections import Counter
 from operator import itemgetter
 
@@ -12,6 +14,8 @@ from tensorflow.keras.callbacks import Callback
 from sklearn.preprocessing import MultiLabelBinarizer
 from tqdm._tqdm_notebook import tqdm_notebook
 from tensorflow.keras.metrics import *
+from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import average_precision_score
 tqdm_notebook.pandas()
 
 class GenrePredictionModel():
@@ -233,12 +237,14 @@ class GenrePredictionModel():
 
         self.model.fit([overview_input, subtitles_input], labels, validation_data=([overview_validation_input, subtitles_validation_input], validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
 
-    def evaluate(self, data=None, file_path=None, genre_column="Genre Labels", batch_size=2, output_vectors=False, data_type="", load_encoded_data=False,
+    def evaluate(self, data=None, binary_labels=None, file_path=None, genre_column="Genre Labels", batch_size=2, output_vectors=False, data_type="", load_encoded_data=False,
                  save_encoded_data=False):
+        binary_predictions = None
+
         if file_path is not None:
-            predictions = pd.read_excel(file_path)
+            predictions_df = pd.read_excel(file_path)
         else:
-            predictions = self.predict(data, batch_size=batch_size, output_vectors=output_vectors, data_type=data_type, load_encoded_data=load_encoded_data,
+            binary_predictions, predictions_df = self.predict(data, batch_size=batch_size, output_vectors=output_vectors, data_type=data_type, load_encoded_data=load_encoded_data,
                                        save_encoded_data=save_encoded_data)
         exact_match = []
         num_labels_matching = []
@@ -248,7 +254,7 @@ class GenrePredictionModel():
         predicted_num_labels = []
         accuracy = []
 
-        for i, row in predictions.iterrows():
+        for i, row in predictions_df.iterrows():
             genre_labels = set(self.split_string_list(row[genre_column]))
             genre_predictions = set(self.split_string_list(row["Genre Predictions"]))
 
@@ -288,18 +294,40 @@ class GenrePredictionModel():
             else:
                 double_miss.append(False)
 
-        predictions["Exact Match"] = exact_match
-        predictions["Single Miss"] = single_miss
-        predictions["Double Miss"] = double_miss
-        predictions["Accuracy"] = accuracy
-        predictions["Num Labels"] = num_labels
-        predictions["Predicted Num Labels"] = predicted_num_labels
-        predictions["Num Labels Matching"] = num_labels_matching
-        predictions["Additional Labels"] = np.array(predicted_num_labels) - np.array(num_labels_matching)
+        print("Exact Match:", sum(exact_match)/len(exact_match))
 
-        predictions.sort_values(by=["Exact Match", "Single Miss", "Double Miss"], ascending=False, inplace=True)
+        predictions_df.sort_values(by=["Exact Match", "Single Miss", "Double Miss"], ascending=False, inplace=True)
 
-        return predictions
+        precision = dict()
+        recall = dict()
+        average_precision = dict()
+
+        for i in range(len(predictions_df.shape[1])):
+            precision[i], recall[i], _ = precision_recall_curve(binary_labels[:, i],
+                                                                binary_predictions[:, i])
+            average_precision[i] = average_precision_score(binary_labels[:, i], binary_predictions[:, i])
+
+        # A "micro-average": quantifying score on all classes jointly
+        precision["micro"], recall["micro"], _ = precision_recall_curve(binary_labels.ravel(),
+                                                                        binary_predictions.ravel())
+        average_precision["micro"] = average_precision_score(binary_labels, binary_predictions,
+                                                             average="micro")
+
+        print('Average precision score, micro-averaged over all classes: {0:0.2f}'
+              .format(average_precision["micro"]))
+
+        predictions_df["Exact Match"] = exact_match
+        predictions_df["Single Miss"] = single_miss
+        predictions_df["Double Miss"] = double_miss
+        predictions_df["Accuracy"] = accuracy
+        predictions_df["Num Labels"] = num_labels
+        predictions_df["Predicted Num Labels"] = predicted_num_labels
+        predictions_df["Num Labels Matching"] = num_labels_matching
+        predictions_df["Additional Labels"] = np.array(predicted_num_labels) - np.array(num_labels_matching)
+        predictions_df["Precision"] = precision
+        predictions_df["Recall"] = recall
+
+        return predictions_df
 
     def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, data_type="", load_encoded_data=False, save_encoded_data=False):
 
@@ -324,13 +352,16 @@ class GenrePredictionModel():
             X = [overview_encoded_data, subtitle_encoded_data]
 
             raw_predictions = self.model.predict(X, batch_size=batch_size, use_multiprocessing=True, verbose=1)
+
             print("Finished with raw predictions...")
 
             predictions = []
             prediction_probs = []
+            binary_predictions = []
 
             for i, prediction in enumerate(raw_predictions):
-                indexes = [i for i, x in enumerate(prediction) if x >= 0.45]
+                indexes = [i for i, x in enumerate(prediction) if x >= 0.50]
+                binary_prediction = [1 if x >= 0.50 else 0 for i, x in enumerate(prediction)]
 
                 if len(indexes) > 0:
                     pred_text = itemgetter(*indexes)(self.genres)
@@ -343,19 +374,20 @@ class GenrePredictionModel():
                     pred_text = [pred_text]
                     pred_probs = [pred_probs]
 
+                binary_predictions.append(binary_prediction)
                 pred_probs, pred_text = (list(t) for t in zip(*sorted(zip(pred_probs, pred_text), reverse=True)))
                 prediction_probs.append(str([round(prob, 5) for prob in pred_probs]).replace("[", "").replace("]", "").replace("'", ""))
                 predictions.append(str(pred_text).replace("[", "").replace("]", "").replace("'", ""))
 
-            prediction_data = pd.DataFrame()
-            prediction_data["Id"] = ids
-            prediction_data["Title"] = titles
-            prediction_data["Overview"] = data["Overview"]
-            prediction_data["Plot"] = data["Plot"]
-            prediction_data["Genre Labels"] = labels
-            prediction_data["Genre Predictions"] = predictions
-            prediction_data["Prediction Probabilities"] = prediction_probs
-            prediction_data = prediction_data.replace(to_replace="[", value="").replace(to_replace="]", value="").replace(to_replace="'", value="")
+            prediction_data_df = pd.DataFrame()
+            prediction_data_df["Id"] = ids
+            prediction_data_df["Title"] = titles
+            prediction_data_df["Overview"] = data["Overview"]
+            prediction_data_df["Plot"] = data["Plot"]
+            prediction_data_df["Genre Labels"] = labels
+            prediction_data_df["Genre Predictions"] = predictions
+            prediction_data_df["Prediction Probabilities"] = prediction_probs
+            prediction_data_df = prediction_data_df.replace(to_replace="[", value="").replace(to_replace="]", value="").replace(to_replace="'", value="")
 
             subtitles_output = self.model.get_layer("SubtitlesEncoding").output
             encoded_data_model = Model(self.model.input, subtitles_output)
@@ -380,7 +412,7 @@ class GenrePredictionModel():
 
                 pred_df.to_csv("data/" + data_type + "_" if data_type != "" else "" + "output_vectors.csv", header=False)
 
-            return prediction_data
+            return binary_predictions, prediction_data_df
 
     class CallbackActions(Callback):
         def __init__(self, main_model=None, sentence_model=None, vectorizer=None):
@@ -406,9 +438,18 @@ class GenrePredictionModel():
 
 if __name__ == "__main__":
 
+    evaluate = True
+    train = False
+    load_weights = True
+    
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
-    genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=True)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx") # rows=150, validation_split=0.10)
-    genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=3)
+    genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
+
+    if evaluate:
+        genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels)
+
+    if train:
+        genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=3)
 
     print("Done")
