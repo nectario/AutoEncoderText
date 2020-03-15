@@ -1,4 +1,5 @@
 import os
+#os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 from collections import Counter
 from operator import itemgetter
 
@@ -52,7 +53,7 @@ class GenrePredictionModel():
             validation_df = data_df[data_df.Validation == True]
 
         training_df.loc[:, "Overview"] = training_df["Overview"].apply(lambda x: x+" ") + training_df["Plot"]
-        validation_df.loc[:, "Overview"] = validation_df["Overview"] + validation_df["Plot"]
+        validation_df.loc[:, "Overview"] = validation_df["Overview"].apply(lambda x: x+" ") + validation_df["Plot"]
 
         training_df.loc[:,"Subtitles"] = training_df["Subtitles 1"] + training_df["Subtitles 2"]
         validation_df.loc[:, "Subtitles"] = validation_df["Subtitles 1"] + validation_df["Subtitles 2"]
@@ -188,7 +189,7 @@ class GenrePredictionModel():
 
         embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=False, name="Embedding")(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
-        cnn_sentence = Conv1D(220, 4, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
+        cnn_sentence = Conv1D(220, 3, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
         sentence_encoding = Bidirectional(LSTM(lstm_output_size, recurrent_dropout=0.10))(max_pool_sentence)
 
@@ -490,7 +491,7 @@ if __name__ == "__main__":
     train = True
     load_weights = False
 
-    vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
+    vectorizer = MultiVectorizer()#glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
