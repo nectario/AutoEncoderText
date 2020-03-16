@@ -7,7 +7,7 @@ import tensorflow as tf
 from common.MultiVectorizer import *
 import pandas as pd
 from tensorflow.keras.layers import Dense, Embedding, Input, LSTM, TimeDistributed, SpatialDropout1D, Conv1D, MaxPooling1D, Dropout, AdditiveAttention, Attention, \
-    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector
+    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector, Masking
 from tensorflow.keras.models import Model
 from common.data_utils import *
 from tensorflow.keras.callbacks import Callback
@@ -183,7 +183,7 @@ class GenrePredictionModel():
 
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
 
-        overview_input = Input(shape=(None, None), dtype='int64', name="PlotInput")
+        overview_input = Input(shape=(None, None), dtype='int64', name="OverviewInput")
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
 
@@ -191,9 +191,8 @@ class GenrePredictionModel():
         spatial_dropout_sentence = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedded_sentence)
         cnn_sentence = Conv1D(220, 3, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
-        sentence_encoding = Bidirectional(LSTM(lstm_output_size, recurrent_dropout=0.10))(max_pool_sentence)
 
-        #overview_sentence_output, sentence_encoding, subtitles_sentence_output = self.get_autoencoder_layers(lstm_1)
+        sentence_encoding = Bidirectional(LSTM(lstm_output_size, recurrent_dropout=0.10))(max_pool_sentence)
 
         sentence_model = Model(sentence_input, sentence_encoding)
 
@@ -213,18 +212,20 @@ class GenrePredictionModel():
         subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
 
         overview_dropout = SpatialDropout1D(0.20)(overview_maxpool)
-        overview_pre_attention_output = Dense(number_of_labels, name="PlotPreAttnOutput")(overview_dropout)
+        overview_pre_attention_output = Dense(number_of_labels, name="OverviewPreAttnOutput")(overview_dropout)
 
         subtitles_dropout = SpatialDropout1D(0.20, name="SubtitlesDropout")(subtitles_maxpool)
         subtitles_pre_attention_output = Dense(number_of_labels, name="SubtitlesPreAttnOutput")(subtitles_dropout)
 
-        attention_overview = AdditiveAttention(name="PlotAttention")([overview_pre_attention_output, overview_maxpool])
+        attention_overview = AdditiveAttention(name="OverviewAttention")([overview_pre_attention_output, overview_maxpool])
         attention_subtitles = AdditiveAttention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
 
-        overview_output = GlobalAveragePooling1D(name="GlobalAvgPoolPlot")(attention_overview)
-        subtitles_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
+        overview_max_output = GlobalMaxPool1D(name="GlobalMaxPoolOverview")(attention_overview)
+        subtitles_max_output = GlobalMaxPool1D(name="GlobalMaxPoolSubitles")(attention_subtitles)
+        overview_avg_output = GlobalAveragePooling1D(name="GlobalAvgPoolOverview")(attention_overview)
+        subtitles_avg_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
 
-        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([overview_output, subtitles_output])
+        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([overview_max_output, subtitles_max_output, overview_avg_output, subtitles_avg_output])
         dropput = Dropout(0.40)(concat_output)
         output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
 
@@ -240,7 +241,7 @@ class GenrePredictionModel():
         self.model = model
         if self.load_weights:
             self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights(self.latest_weights)  #("data/weights/main_model.h5")
+            self.model.load_weights("data/weights/main_model.h5")  #(self.latest_weights)
         return sentence_model, model
 
     def get_autoencoder_layers(self, lstm_1):
@@ -491,7 +492,7 @@ if __name__ == "__main__":
     train = True
     load_weights = False
 
-    vectorizer = MultiVectorizer()#glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
+    vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
@@ -499,6 +500,6 @@ if __name__ == "__main__":
         evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
         evaluation_df.to_excel("data/new_evaluation.xlsx", index=False)
     if train:
-        genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=3)
+        genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2)
 
     print("Done")
