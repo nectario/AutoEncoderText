@@ -7,7 +7,7 @@ import tensorflow as tf
 from common.MultiVectorizer import *
 import pandas as pd
 from tensorflow.keras.layers import Dense, Embedding, Input, LSTM, TimeDistributed, SpatialDropout1D, Conv1D, MaxPooling1D, Dropout, AdditiveAttention, Attention, \
-    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector, Masking
+    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector, Masking, Flatten
 from tensorflow.keras.models import Model
 from common.data_utils import *
 from tensorflow.keras.callbacks import Callback
@@ -190,6 +190,20 @@ class GenrePredictionModel():
             data = pickle.load(pickle_file)
             return data
 
+    def very_simple_model(self, embedding_size=300, number_of_labels=130):
+        text_input = Input(shape=(None,), dtype='int64', name="TextInput")
+        embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=False, name="Embedding")(text_input)
+        spatial_dropout = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedding)
+        cnn_1 = Conv1D(256, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
+        max_pool = MaxPooling1D(pool_size=3, name="MaxPooling1D")(cnn_1)
+        flatten = Flatten(max_pool)
+        dropout = Dropout(0.4)(flatten)
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropout)
+        model = Model(text_input, output)
+        model.compile(loss='binary_crossentropy',
+                      optimizer='adamax',
+                      metrics=self.METRICS)
+
     def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=130):
 
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
@@ -252,7 +266,7 @@ class GenrePredictionModel():
         self.model = model
         if self.load_weights:
             self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights("data/weights/checkpoints/cp-epoch_15-accuracy_0.987_val_precision_0.420-val_recall_0.095-val_auc_0.851.ckpt")
+            self.model.load_weights("data/weights/checkpoints/cp-epoch_02-accuracy_0.984_val_precision_0.682-val_recall_0.153-val_auc_0.913.ckpt")
         return sentence_model, model
 
     def get_autoencoder_layers(self, lstm_1):
