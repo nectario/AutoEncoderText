@@ -39,36 +39,39 @@ class GenrePredictionModel():
 
     def load_data(self, file_path, rows=None, validation_split=None):
         data_df = pd.read_excel(file_path, nrows=rows)
-        data_df = data_df[data_df.Exclude == False]
+        data_df = data_df[data_df.Exclude == False].reset_index(drop=True)
         data_df.replace("vislted", "visited", inplace=True)
         data_df.replace(r'[^\x00-\x7F]+',' ', inplace=True, regex=True)
         data_df.replace(0,"", inplace=True)
         filtered_data_df = data_df.query(r"(Overview != 0 and Overview != '' and Overview.notna()) or (Plot != 0 and Plot != '' and Plot.notna())").reset_index(drop=True)
 
         if validation_split is not None:
-            data_df = data_df[data_df.Training == True].reset_index()
-            training_df = data_df[:int(1 - data_df.shape[0]*validation_split)].reset_index(drop=True)
-            validation_df = data_df[int(1 - data_df.shape[0]*validation_split)+1: - 1].reset_index(drop=True)
+            filtered_data_df = filtered_data_df[filtered_data_df.Training == True].reset_index()
+            training_df = filtered_data_df[:int(1 - filtered_data_df.shape[0]*validation_split)].reset_index(drop=True)
+            validation_df = filtered_data_df[int(1 - filtered_data_df.shape[0]*validation_split)+1: - 1].reset_index(drop=True)
         else:
-            training_df = filtered_data_df[filtered_data_df.Training == True].reset_index(drop=True)
+            training_df = filtered_data_df.reset_index(drop=True)
             validation_df = filtered_data_df[filtered_data_df.Validation == True].reset_index(drop=True)
-            print("")
 
         training_df["Overview"] = training_df["Overview"].apply(lambda x: x+" ") + training_df["Plot"]
         validation_df["Overview"] = validation_df["Overview"].apply(lambda x: x+" ") + validation_df["Plot"]
 
-        training_df = training_df.query("Overview.notna()")
-        validation_df = validation_df.query("Overview.notna()")
-
-        training_df = pd.concat([training_data_df, validation_data_df])
+        #validation_df = validation_df.query("Overview.notna()")
 
         training_df["Subtitles"] = training_df["Subtitles 1"] + training_df["Subtitles 2"]
         validation_df["Subtitles"] = validation_df["Subtitles 1"] + validation_df["Subtitles 2"]
+        training_df = training_df.query("Overview.notna() and Subtitles.notna()").reset_index(drop=True)
+        validation_df = validation_df.query("Overview.notna() and Subtitles.notna()").reset_index(drop=True)
+
+
         training_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
         validation_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
 
         training_df["Labels"] = training_df["Genres"].apply(self.parse_str_labels)
         validation_df["Labels"] = validation_df["Genres"].apply(self.parse_str_labels)
+
+        training_df.to_excel("data/training_data.xlsx")
+        validation_df.to_excel("data/validation_data.xlsx", index=False)
 
         self.genres = self.load_current_genres(file_path="data/current_genre_reduced.xlsx")
 
@@ -134,8 +137,8 @@ class GenrePredictionModel():
         avg_words = np.mean(word_lens)
         most_common_sents = Counter(sent_lens).most_common(20)
         most_common_words = Counter(word_lens).most_common(20)
-        most_common_sents = max(list(zip(*most_common_sents))[0]) + 30
-        most_common_words = max(list(zip(*most_common_words))[0]) + 30
+        most_common_sents = max(list(zip(*most_common_sents))[0]) + 35
+        most_common_words = max(list(zip(*most_common_words))[0]) + 35
 
         if debug:
             print("Max sentences:", max_sents)
@@ -248,7 +251,7 @@ class GenrePredictionModel():
         self.model = model
         if self.load_weights:
             self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights("data/weights/checkpoints/cp-epoch_15-accuracy_0.987_val_precision_0.420-val_recall_0.095-val_auc_0.851.ckpt")
+            self.model.load_weights("data/weights/cp-epoch_15-accuracy_0.987_val_precision_0.420-val_recall_0.095-val_auc_0.851.ckpt")
         return sentence_model, model
 
     def get_autoencoder_layers(self, lstm_1):
@@ -265,8 +268,11 @@ class GenrePredictionModel():
     def fit(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10, save_encoded_data=False):
         print("Pre-processing training data...")
         overview_input, subtitles_input = self.preprocess(data)
-        print("Pre-processing validation data...")
-        overview_validation_input, subtitles_validation_input = self.preprocess(validation_data, save_encoded_data=save_encoded_data)
+        if validation_data is not None:
+            print("Pre-processing validation data...")
+            overview_validation_input, subtitles_validation_input = self.preprocess(validation_data, save_encoded_data=save_encoded_data)
+            validation_data = ([overview_validation_input, subtitles_validation_input], validation_labels)
+
         self.sentence_model, self.model = self.get_two_input_model(number_of_labels=len(self.genres))
 
         callback_actions = self.CallbackActions(main_model=self.model, sentence_model=self.sentence_model, vectorizer=self.vectorizer)
@@ -275,7 +281,7 @@ class GenrePredictionModel():
                                                          save_weights_only=True,
                                                          verbose=1)
 
-        self.model.fit([overview_input, subtitles_input], labels, validation_data=([overview_validation_input, subtitles_validation_input], validation_labels), epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
+        self.model.fit([overview_input, subtitles_input], labels, validation_data=validation_data, epochs=epochs, callbacks=[callback_actions, cp_callback], batch_size=batch_size)
 
     def evaluate(self, data=None, binary_labels=None, file_path=None, genre_column="Genre Labels", batch_size=2, output_vectors=False, data_type="", load_encoded_data=False,
                  save_encoded_data=False):
@@ -391,8 +397,8 @@ class GenrePredictionModel():
                 print("data/overview_encoded_data.dat")
                 print("data/plot_encoded_data.dat")
                 print("data/subtitle_encoded_data.dat")
-                overview_encoded_data = self.load_pickle_data("data/weights/" + data_type + "_" if data_type != "" else "" + "overview_encoded_data.dat")
-                subtitle_encoded_data = self.load_pickle_data("data/weights/" + data_type + "_" if data_type != "" else "" + "subtitle_encoded_data.dat")
+                overview_encoded_data = self.load_pickle_data("data/weights/overview_encoded_data.dat")
+                subtitle_encoded_data = self.load_pickle_data("data/weights/subtitle_encoded_data.dat")
             else:
                 overview_encoded_data, subtitle_encoded_data = self.preprocess(data, save_encoded_data=save_encoded_data)
 
@@ -498,16 +504,18 @@ if __name__ == "__main__":
     evaluate = False
     train = True
     load_weights = True
+    use_val = True
 
     vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
 
-    if train:
-        genre_prediction.fit(training_data_df, genre_prediction.training_labels[0:6000], validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2)
-
     if evaluate:
-        evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3, load_encoded_data=True)
+        evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
         evaluation_df.to_excel("data/validation_evaluation.xlsx", index=False)
+
+    if train:
+        genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2, save_encoded_data=True)
+
 
     print("Done")
