@@ -196,9 +196,9 @@ class GenrePredictionModel():
         spatial_dropout = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedding)
         cnn_1 = Conv1D(256, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
         max_pool = MaxPooling1D(pool_size=3, name="MaxPooling1D")(cnn_1)
-        flatten = Flatten(max_pool)
-        dropout = Dropout(0.4)(flatten)
-        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropout)
+        dropout = SpatialDropout1D(0.2)(max_pool)
+        flatten = Flatten(dropout)
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(flatten)
         model = Model(text_input, output)
         model.compile(loss='binary_crossentropy',
                       optimizer='adamax',
