@@ -194,7 +194,7 @@ class GenrePredictionModel():
         text_input = Input(shape=(None,), dtype='int64', name="TextInput")
         embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=False, name="Embedding")(text_input)
         spatial_dropout = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedding)
-        cnn_1 = Conv1D(256, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
+        cnn_1 = Conv1D(512, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
         max_pool = MaxPooling1D(pool_size=3, name="MaxPooling1D")(cnn_1)
         dropout = SpatialDropout1D(0.2)(max_pool)
         flatten = Flatten(dropout)
