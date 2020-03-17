@@ -17,13 +17,17 @@ from tensorflow.keras.metrics import *
 from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
 from tensorflow.keras.preprocessing.text import one_hot
-
+import time
 tqdm_notebook.pandas()
 
 class GenrePredictionModel():
     def __init__(self, vectorizer=None, load_weights=False):
         self.vectorizer = vectorizer
         self.load_weights = load_weights
+
+        if self.load_weights:
+            self.vectorizer = self.vectorizer.load("data/weights/vectorizer.dat")
+
         self.METRICS = [
             BinaryAccuracy(name='accuracy'),
             Precision(name='precision'),
@@ -50,7 +54,7 @@ class GenrePredictionModel():
             training_df = filtered_data_df[:int(1 - filtered_data_df.shape[0]*validation_split)].reset_index(drop=True)
             validation_df = filtered_data_df[int(1 - filtered_data_df.shape[0]*validation_split)+1: - 1].reset_index(drop=True)
         else:
-            training_df = filtered_data_df.reset_index(drop=True)
+            training_df = filtered_data_df[filtered_data_df.Training == True].reset_index(drop=True)
             validation_df = filtered_data_df[filtered_data_df.Validation == True].reset_index(drop=True)
 
         training_df["Overview"] = training_df["Overview"].apply(lambda x: x+" ") + training_df["Plot"]
@@ -62,7 +66,6 @@ class GenrePredictionModel():
         validation_df["Subtitles"] = validation_df["Subtitles 1"] + validation_df["Subtitles 2"]
         training_df = training_df.query("Overview.notna() and Subtitles.notna()").reset_index(drop=True)
         validation_df = validation_df.query("Overview.notna() and Subtitles.notna()").reset_index(drop=True)
-
 
         training_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
         validation_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
@@ -169,8 +172,9 @@ class GenrePredictionModel():
         #subtitles_one_hot = one_hot(data["Subtitles"], vectorizer.get_vocabulary_size(), filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ')
 
         if save_encoded_data:
-            self.save_pickle_data(overview_data, file_path="data/overview_encoded_data.dat")
-            self.save_pickle_data(overview_data, file_path="data/subtitles_encoded_data.dat")
+            timestr = time.strftime("%m%d-%H%M%S")
+            self.save_pickle_data(overview_data, file_path="data/overview_encoded_data+"+timestr+".dat")
+            self.save_pickle_data(overview_data, file_path="data/subtitles_encoded_data"+ timestr+".dat")
 
         return self.pad_list_of_lists(overview_data), self.pad_list_of_lists(subtitles_data)
 
@@ -187,9 +191,6 @@ class GenrePredictionModel():
             return data
 
     def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=130):
-
-        if self.load_weights:
-            self.vectorizer = self.vectorizer.load("data/weights/vectorizer.dat")
 
         print("Vocabulary Size:", self.vectorizer.get_vocabulary_size())
 
@@ -251,7 +252,7 @@ class GenrePredictionModel():
         self.model = model
         if self.load_weights:
             self.sentence_model.load_weights("data/weights/sentence_model.h5")
-            self.model.load_weights("data/weights/cp-epoch_15-accuracy_0.987_val_precision_0.420-val_recall_0.095-val_auc_0.851.ckpt")
+            self.model.load_weights("data/weights/checkpoints/cp-epoch_15-accuracy_0.987_val_precision_0.420-val_recall_0.095-val_auc_0.851.ckpt")
         return sentence_model, model
 
     def get_autoencoder_layers(self, lstm_1):
@@ -395,7 +396,6 @@ class GenrePredictionModel():
             if load_encoded_data:
                 print("Loading encoded data for efficiency...")
                 print("data/overview_encoded_data.dat")
-                print("data/plot_encoded_data.dat")
                 print("data/subtitle_encoded_data.dat")
                 overview_encoded_data = self.load_pickle_data("data/weights/overview_encoded_data.dat")
                 subtitle_encoded_data = self.load_pickle_data("data/weights/subtitle_encoded_data.dat")
