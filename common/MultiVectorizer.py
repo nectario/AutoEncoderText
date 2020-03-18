@@ -97,8 +97,8 @@ class MultiVectorizer():
         self.vocabulary.add_documents(vocab)
         return output_tokens
 
-    def fit(self, X, remove_stop_words=True):
-        if type(X[0]) == list:
+    def fit(self, X, remove_stop_words=True, list_of_lists=False):
+        if list_of_lists:
             x_tokens = self.fit_samples_with_sentences(X,remove_stop_words=remove_stop_words) #self.fit_document(X)
         else:
             x_tokens = self.fit_text(X)
@@ -130,24 +130,27 @@ class MultiVectorizer():
         unknown_words_df = pd.DataFrame()
         unknown_words_df["Unknown Words"] = unknown_words
         unknown_words_df.to_excel("data/unknown_words.xlsx", index=False)
-        return  self.transform(x_tokens)
+        return  self.transform(x_tokens, list_of_lists=list_of_lists)
 
-    def fit_text(self, X):
-        x_tokens = []
-        for x in X:
-            if x is not None:
-                # x_tokens.append(word_tokenize(x.lower()))
-                tokens = self.tokenizer(x.lower())
-                word_str_tokens = list(map(convert_to_string, tokens))
-                x_tokens.append(word_str_tokens)
-                self.vocabulary.add_documents(x_tokens)
-        return x_tokens
+    def fit_text(self, X, remove_stop_words=True):
+        output_tokens = []
+        for sample in tqdm(X):
+            tokens = self.tokenizer(sample.lower())
+            if remove_stop_words:
+                tokens = [token for token in tokens if not token.is_stop]
+            word_str_tokens = list(map(convert_to_string, tokens))
+            output_tokens.append(word_str_tokens)
+        self.vocabulary.add_documents(output_tokens)
+        return output_tokens
 
     def correct_word(self, word):
         return word
 
-    def transform(self, X):
-        return self.transform_list_of_list(X)
+    def transform(self, X, list_of_lists=False):
+        if list_of_lists:
+            return self.transform_list_of_list(X)
+        else:
+            return self.transform_section(X)
 
     def transform_list_of_list(self, samples):
         samples_tokens = []

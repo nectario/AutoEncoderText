@@ -18,12 +18,19 @@ from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
 from tensorflow.keras.preprocessing.text import one_hot
 import time
+
+MAX_TEXT_LENGTH = 12500
 tqdm_notebook.pandas()
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras import backend as K
+print(K.image_data_format())
+K.set_image_data_format('channels_last')
 
 class GenrePredictionModel():
     def __init__(self, vectorizer=None, load_weights=False):
         self.vectorizer = vectorizer
         self.load_weights = load_weights
+        self.max_shape = None
 
         if self.load_weights:
             self.vectorizer = self.vectorizer.load("data/weights/vectorizer.dat")
@@ -41,13 +48,21 @@ class GenrePredictionModel():
         print("Checkpoint dir:",self.checkpoint_dir)
         #self.checkpoint_weights = tf.train.checkpoints_iterator() load_checkpoint(self.best_checkpoint) #latest_checkpoint(self.checkpoint_dir)
 
-    def load_data(self, file_path, rows=None, validation_split=None):
+    def load_data(self, file_path, rows=None, validation_split=None, no_nan_overview_plot=True):
         data_df = pd.read_excel(file_path, nrows=rows)
         data_df = data_df[data_df.Exclude == False].reset_index(drop=True)
         data_df.replace("vislted", "visited", inplace=True)
         data_df.replace(r'[^\x00-\x7F]+',' ', inplace=True, regex=True)
         data_df.replace(0,"", inplace=True)
-        filtered_data_df = data_df.query(r"(Overview != 0 and Overview != '' and Overview.notna()) or (Plot != 0 and Plot != '' and Plot.notna())").reset_index(drop=True)
+        filtered_data_df = data_df
+
+        filtered_data_df["Subtitles"] = filtered_data_df["Subtitles 1"] + filtered_data_df["Subtitles 2"]
+        filtered_data_df = data_df.query(r"(Subtitles.notna())").reset_index(drop=True)
+        filtered_data_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
+        filtered_data_df["Overview"] = filtered_data_df["Overview"].apply(lambda x: x + " ") + filtered_data_df["Plot"]
+
+        if no_nan_overview_plot:
+            filtered_data_df = filtered_data_df.query("Overview.notna()").reset_index(drop=True)
 
         if validation_split is not None:
             filtered_data_df = filtered_data_df[filtered_data_df.Training == True].reset_index()
@@ -56,19 +71,7 @@ class GenrePredictionModel():
         else:
             training_df = filtered_data_df[filtered_data_df.Training == True].reset_index(drop=True)
             validation_df = filtered_data_df[filtered_data_df.Validation == True].reset_index(drop=True)
-
-        training_df["Overview"] = training_df["Overview"].apply(lambda x: x+" ") + training_df["Plot"]
-        validation_df["Overview"] = validation_df["Overview"].apply(lambda x: x+" ") + validation_df["Plot"]
-
-        #validation_df = validation_df.query("Overview.notna()")
-
-        training_df["Subtitles"] = training_df["Subtitles 1"] + training_df["Subtitles 2"]
-        validation_df["Subtitles"] = validation_df["Subtitles 1"] + validation_df["Subtitles 2"]
-        training_df = training_df.query("Overview.notna() and Subtitles.notna()").reset_index(drop=True)
-        validation_df = validation_df.query("Overview.notna() and Subtitles.notna()").reset_index(drop=True)
-
-        training_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
-        validation_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
+            validation_df = validation_df.query("Overview.notna()").reset_index(drop=True)
 
         training_df["Labels"] = training_df["Genres"].apply(self.parse_str_labels)
         validation_df["Labels"] = validation_df["Genres"].apply(self.parse_str_labels)
@@ -163,14 +166,34 @@ class GenrePredictionModel():
                 result[index, idx, :len(row) if len(row) < shape[2] else shape[2]] = row[:len(row) if len(row) < shape[2] else shape[2]]
         return result
 
+    def pad(self, array, max_length=None, fill_value=0.0, debug=True):
+        word_lens = []
+        for i, text in enumerate(array):
+            word_lens.append(len(text))
+
+        max_words = max(word_lens)
+        avg_words = np.mean(word_lens)
+        most_common_words = Counter(word_lens).most_common(20)
+        most_common_words = max(list(zip(*most_common_words))[0]) + 1000
+
+        if debug:
+            print("Max words:", max_words)
+            print("Avg words:", avg_words)
+            print("Most common words:", most_common_words)
+
+        result = pad_sequences(array, maxlen=max_length, dtype="int32", padding='post', truncating='post')
+
+        return result
+
+    def preprocess_simple(self, data, max_length=None):
+        subtitles_data = np.array(self.vectorizer.fit(data["Subtitles"].values, list_of_lists=False))
+        #overview_data = np.array(self.vectorizer.fit(data["Overview"].values, list_of_lists=False))
+        padded_data = self.pad(subtitles_data, max_length=max_length)
+        return padded_data
+
     def preprocess(self, data, save_encoded_data=False):
-
-        overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values)
-        subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values)
-
-        #overview_one_hot = one_hot(data["Overview"], vectorizer.get_vocabulary_size(), filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ')
-        #subtitles_one_hot = one_hot(data["Subtitles"], vectorizer.get_vocabulary_size(), filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ')
-
+        overview_data = self.vectorizer.fit(data["Overview"].apply(self.get_sentences).values, list_of_lists=True)
+        subtitles_data = self.vectorizer.fit(data["Subtitles"].apply(self.get_sentences).values, list_of_lists=True)
         if save_encoded_data:
             timestr = time.strftime("%m%d-%H%M%S")
             self.save_pickle_data(overview_data, file_path="data/overview_encoded_data+"+timestr+".dat")
@@ -190,19 +213,39 @@ class GenrePredictionModel():
             data = pickle.load(pickle_file)
             return data
 
-    def very_simple_model(self, embedding_size=300, number_of_labels=130):
-        text_input = Input(shape=(None,), dtype='int64', name="TextInput")
-        embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=False, name="Embedding")(text_input)
-        spatial_dropout = SpatialDropout1D(0.20, name="SpatialDropoutSentence")(embedding)
-        cnn_1 = Conv1D(512, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
+    def very_simple_model_version_1(self, embedding_size=300, number_of_labels=130, input_shape=None):
+        text_input = Input(shape=(MAX_TEXT_LENGTH,), dtype='int32', name="TextInput")
+        embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(text_input)
+        spatial_dropout = SpatialDropout1D(0.20, name="SpatialDropoutEmbedding")(embedding)
+        cnn_1 = Conv1D(256, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
         max_pool = MaxPooling1D(pool_size=3, name="MaxPooling1D")(cnn_1)
-        dropout = SpatialDropout1D(0.2)(max_pool)
-        flatten = Flatten(dropout)
+        dropout = SpatialDropout1D(0.2, name="SpatialDropoutMaxPool")(max_pool)
+        flatten = Flatten(name="Flatten")(dropout)
         output = Dense(number_of_labels, activation="sigmoid", name="Output")(flatten)
         model = Model(text_input, output)
         model.compile(loss='binary_crossentropy',
                       optimizer='adamax',
                       metrics=self.METRICS)
+        model.summary()
+        return model
+
+    def very_simple_model(self, embedding_size=300, number_of_labels=130, input_shape=None):
+        text_input = Input(shape=(MAX_TEXT_LENGTH,), dtype='int32', name="TextInput")
+        embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(text_input)
+        spatial_dropout = SpatialDropout1D(0.25, name="SpatialDropoutEmbedding")(embedding)
+        cnn_1 = Conv1D(256, 3, padding="same", activation="relu", strides=1, name="Conv1D")(spatial_dropout)
+        max_pool = MaxPooling1D(pool_size=3, name="MaxPooling1D")(cnn_1)
+        dropout = SpatialDropout1D(0.25, name="SpatialDropoutMaxPool")(max_pool)
+        global_max_pool = GlobalMaxPool1D(name="GlobalMaxPool1D")(dropout)
+        global_avg_pool = GlobalAveragePooling1D(name="GlobalAvgPool1D")(dropout)
+        concatenate = Concatenate(axis=-1, name="OutputConcatenate")([global_max_pool, global_avg_pool])
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(concatenate)
+        model = Model(text_input, output)
+        model.compile(loss='binary_crossentropy',
+                      optimizer='adamax',
+                      metrics=self.METRICS)
+        model.summary()
+        return model
 
     def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=130):
 
@@ -280,6 +323,26 @@ class GenrePredictionModel():
         subtitles_sentence_output = TimeDistributed(Dense(100000, activation="softmax"))(dense)
         return overview_sentence_output, sentence_encoding, subtitles_sentence_output
 
+    def fit_simple(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10, save_encoded_data=False):
+        print("Pre-processing training data...")
+        subtitles_input = self.preprocess_simple(data, max_length=MAX_TEXT_LENGTH)
+        assert len(subtitles_input.shape) == 2
+
+        if validation_data is not None:
+            print("Pre-processing validation data...")
+            subtitles_validation_input = self.preprocess_simple(validation_data, max_length=MAX_TEXT_LENGTH)
+            validation_data = (subtitles_validation_input, validation_labels)
+            assert len(subtitles_validation_input.shape) == 2
+
+        self.model = self.very_simple_model(number_of_labels=len(self.genres), input_shape=(subtitles_input.shape[1],))
+
+        callback_actions = self.CallbackActions(main_model=self.model, vectorizer=self.vectorizer)
+
+
+        self.model.fit(subtitles_input, labels, validation_data=validation_data, epochs=epochs, callbacks=[callback_actions],
+                       batch_size=batch_size)
+
+
     def fit(self, data, labels, validation_data=None, validation_labels=None, batch_size=5, epochs=10, save_encoded_data=False):
         print("Pre-processing training data...")
         overview_input, subtitles_input = self.preprocess(data)
@@ -287,6 +350,7 @@ class GenrePredictionModel():
             print("Pre-processing validation data...")
             overview_validation_input, subtitles_validation_input = self.preprocess(validation_data, save_encoded_data=save_encoded_data)
             validation_data = ([overview_validation_input, subtitles_validation_input], validation_labels)
+
 
         self.sentence_model, self.model = self.get_two_input_model(number_of_labels=len(self.genres))
 
@@ -508,8 +572,11 @@ class GenrePredictionModel():
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.main_model.save_weights("data/weights/main_model.h5")
-            self.sentence_model.save_weights("data/weights/sentence_model.h5")
+            self.main_model.save_weights("data/weights/very_simple_model.h5")
+
+            if self.sentence_model is not None:
+                self.sentence_model.save_weights("data/weights/sentence_model.h5")
+
             self.vectorizer.save("data/weights/vectorizer.dat")
             return
 
@@ -517,19 +584,22 @@ if __name__ == "__main__":
 
     evaluate = False
     train = True
-    load_weights = True
+    load_weights = False
     use_val = True
 
-    vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
+    vectorizer = MultiVectorizer() #glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
     genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights)
-    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx")
+    training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", no_nan_overview_plot=False)
 
     if evaluate:
         evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
         evaluation_df.to_excel("data/validation_evaluation.xlsx", index=False)
 
     if train:
-        genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2, save_encoded_data=True)
+        genre_prediction.fit_simple(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df,
+                                                                            validation_labels=genre_prediction.validation_labels, epochs=2000, batch_size=35)
+
+        #genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2, save_encoded_data=True)
 
 
     print("Done")
