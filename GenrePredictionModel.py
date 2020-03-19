@@ -634,7 +634,7 @@ class GenrePredictionModel():
 
         return predictions_df
 
-    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False):
+    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False, threshold=0.45):
 
         overview_encoded_data = None
         subtitle_encoded_data = None
@@ -676,8 +676,8 @@ class GenrePredictionModel():
             binary_predictions = []
 
             for i, prediction in enumerate(raw_predictions):
-                indexes = [i for i, x in enumerate(prediction) if x >= 0.50]
-                binary_prediction = [1 if x >= 0.45 else 0 for i, x in enumerate(prediction)]
+                indexes = [i for i, x in enumerate(prediction) if x >= threshold]
+                binary_prediction = [1 if x >= threshold else 0 for i, x in enumerate(prediction)]
 
                 if len(indexes) > 0:
                     pred_text = itemgetter(*indexes)(self.genres)
