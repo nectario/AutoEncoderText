@@ -7,7 +7,7 @@ import tensorflow as tf
 from common.MultiVectorizer import *
 import pandas as pd
 from tensorflow.keras.layers import Dense, Embedding, Input, LSTM, TimeDistributed, SpatialDropout1D, Conv1D, MaxPooling1D, Dropout, AdditiveAttention, Attention, \
-    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector, Masking, Flatten
+    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector, Masking, Flatten, Lambda
 from tensorflow.keras.models import Model
 from common.data_utils import *
 from tensorflow.keras.callbacks import Callback
@@ -71,7 +71,7 @@ class GenrePredictionModel():
         else:
             training_df = filtered_data_df[filtered_data_df.Training == True].reset_index(drop=True)
             validation_df = filtered_data_df[filtered_data_df.Validation == True].reset_index(drop=True)
-            validation_df = validation_df.query("Overview.notna()").reset_index(drop=True)
+            #validation_df = validation_df.query("Overview.notna()").reset_index(drop=True)
 
         training_df["Labels"] = training_df["Genres"].apply(self.parse_str_labels)
         validation_df["Labels"] = validation_df["Genres"].apply(self.parse_str_labels)
@@ -213,7 +213,53 @@ class GenrePredictionModel():
             data = pickle.load(pickle_file)
             return data
 
-    def very_simple_model_version_1(self, embedding_size=300, number_of_labels=130, input_shape=None):
+    def bert_model(self, max_seq_len, adapter_size=64):
+
+        bert_model_dir = "data/models/bert"
+        bert_model_name = "uncased_L-12_H-768_A-12"
+
+        bert_ckpt_dir = os.path.join(".model/", bert_model_name)
+        bert_ckpt_file = os.path.join(bert_ckpt_dir, "bert_model.ckpt")
+        bert_config_file = os.path.join(bert_ckpt_dir, "bert_config.json")
+
+        # create the bert layer
+        with tf.io.gfile.GFile(bert_config_file, "r") as reader:
+            bc = StockBertConfig.from_json_string(reader.read())
+            bert_params = map_stock_config_to_params(bc)
+            bert_params.adapter_size = adapter_size
+            bert = BertModelLayer.from_params(bert_params, name="bert")
+
+        input_ids = Input(shape=(max_seq_len,), dtype='int32', name="input_ids")
+        # token_type_ids = keras.layers.Input(shape=(max_seq_len,), dtype='int32', name="token_type_ids")
+        # output         = bert([input_ids, token_type_ids])
+        output = bert(input_ids)
+
+        print("bert shape", output.shape)
+        cls_out = Lambda(lambda seq: seq[:, 0, :])(output)
+        cls_out = Dropout(0.5)(cls_out)
+        logits =  Dense(units=768, activation="tanh")(cls_out)
+        logits =  Dropout(0.5)(logits)
+        logits =  Dense(units=2, activation="softmax")(logits)
+
+        # model = keras.Model(inputs=[input_ids, token_type_ids], outputs=logits)
+        # model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
+        model = keras.Model(inputs=input_ids, outputs=logits)
+        model.build(input_shape=(None, max_seq_len))
+
+        # load the pre-trained model weights
+        load_stock_weights(bert, bert_ckpt_file)
+
+        # freeze weights if adapter-BERT is used
+        if adapter_size is not None:
+            freeze_bert_layers(bert)
+
+        model.compile(optimizer=keras.optimizers.Adam(),
+                      loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                      metrics=[keras.metrics.SparseCategoricalAccuracy(name="acc")])
+
+        model.summary()
+
+    def very_simple_model_version_1(self, embedding_size=300, number_of_labels=130):
         text_input = Input(shape=(MAX_TEXT_LENGTH,), dtype='int32', name="TextInput")
         embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(text_input)
         spatial_dropout = SpatialDropout1D(0.20, name="SpatialDropoutEmbedding")(embedding)
@@ -229,7 +275,7 @@ class GenrePredictionModel():
         model.summary()
         return model
 
-    def very_simple_model(self, embedding_size=300, number_of_labels=130, input_shape=None):
+    def very_simple_model(self, embedding_size=300, number_of_labels=130):
         text_input = Input(shape=(MAX_TEXT_LENGTH,), dtype='int32', name="TextInput")
         embedding = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(text_input)
         spatial_dropout = SpatialDropout1D(0.25, name="SpatialDropoutEmbedding")(embedding)
@@ -240,12 +286,16 @@ class GenrePredictionModel():
         global_avg_pool = GlobalAveragePooling1D(name="GlobalAvgPool1D")(dropout)
         concatenate = Concatenate(axis=-1, name="OutputConcatenate")([global_max_pool, global_avg_pool])
         output = Dense(number_of_labels, activation="sigmoid", name="Output")(concatenate)
-        model = Model(text_input, output)
-        model.compile(loss='binary_crossentropy',
+        self.model = Model(text_input, output)
+        self.model.compile(loss='binary_crossentropy',
                       optimizer='adamax',
                       metrics=self.METRICS)
-        model.summary()
-        return model
+        self.model.summary()
+        if self.load_weights:
+            self.model.load_weights("data/weights/very_simple_model.h5")
+
+
+        return self.model
 
     def get_two_input_model(self, embedding_size=300, lstm_output_size=500, number_of_labels=130):
 
@@ -334,12 +384,14 @@ class GenrePredictionModel():
             validation_data = (subtitles_validation_input, validation_labels)
             assert len(subtitles_validation_input.shape) == 2
 
-        self.model = self.very_simple_model(number_of_labels=len(self.genres), input_shape=(subtitles_input.shape[1],))
+        self.model = self.very_simple_model(number_of_labels=len(self.genres))
 
         callback_actions = self.CallbackActions(main_model=self.model, vectorizer=self.vectorizer)
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path,
+                                                         save_weights_only=True,
+                                                         verbose=1)
 
-
-        self.model.fit(subtitles_input, labels, validation_data=validation_data, epochs=epochs, callbacks=[callback_actions],
+        self.model.fit(subtitles_input, labels, validation_data=validation_data, epochs=epochs, callbacks=[callback_actions, cp_callback],
                        batch_size=batch_size)
 
 
@@ -468,8 +520,124 @@ class GenrePredictionModel():
 
         return predictions_df
 
-    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, data_type="", load_encoded_data=False, save_encoded_data=False):
 
+    def evaluate_simple(self, data=None, binary_labels=None, file_path=None, genre_column="Genre Labels", batch_size=2, output_vectors=False, data_type="", load_encoded_data=False,
+                 save_encoded_data=False):
+        binary_predictions = None
+
+        self.model = self.very_simple_model(number_of_labels=len(self.genres))
+
+        if file_path is not None:
+            predictions_df = pd.read_excel(file_path)
+        else:
+            binary_predictions, predictions_df = self.predict(data, batch_size=batch_size, output_vectors=output_vectors, data_type=data_type, load_encoded_data=load_encoded_data,
+                                       save_encoded_data=save_encoded_data)
+        exact_match = []
+        num_labels_matching = []
+        single_miss = []
+        double_miss = []
+        num_labels = []
+        predicted_num_labels = []
+        accuracy = []
+
+        for i, row in predictions_df.iterrows():
+            genre_labels = set(self.split_string_list(row[genre_column]))
+            genre_predictions = set(self.split_string_list(row["Genre Predictions"]))
+
+            labels_len = len(genre_labels)
+            pred_labels_len = len(genre_predictions)
+
+            num_labels.append(labels_len)
+            predicted_num_labels.append(pred_labels_len)
+
+            labels_matching = len(genre_labels.intersection(genre_predictions))
+            num_labels_matching.append(labels_matching)
+
+            if genre_labels == genre_predictions and len(genre_predictions) > 0:
+                exact_match.append(True)
+            else:
+                exact_match.append(False)
+
+            set_union = genre_labels.union(genre_predictions)
+            set_intersection = genre_labels.intersection(genre_predictions)
+
+            if len(set_union) > 0:
+                accuracy.append(round(len(set_intersection) / (len(set_union)), 4) * 100 )
+            else:
+                accuracy.append(0)
+
+            diff = 0
+            if len(genre_predictions) > 0 and len(set_intersection) > 0 and (len(genre_labels) != len(genre_predictions)):
+                diff = len(genre_labels.difference(set_intersection))
+            elif len(genre_predictions) > 0 and len(genre_labels) == len(genre_predictions):
+                diff = np.absolute(len(genre_labels) - len(set_intersection))
+
+            if diff == 1 and len(genre_labels) > 1 and len(genre_predictions) > 1:
+                single_miss.append(True)
+            else:
+                single_miss.append(False)
+
+            if diff == 2 and len(genre_labels) > 2 and len(genre_predictions) > 2:
+                double_miss.append(True)
+            else:
+                double_miss.append(False)
+
+        print("Exact Match:", sum(exact_match)/len(exact_match))
+
+        precision = dict()
+        recall = dict()
+        average_precision = dict()
+
+        try:
+            binary_labels = np.array(binary_labels)
+            binary_predictions = np.array(binary_predictions)
+            for i in range(predictions_df.shape[1]):
+                precision[i], recall[i], _ = precision_recall_curve(binary_labels[:, i],
+                                                                    binary_predictions[:, i])
+                average_precision[i] = average_precision_score(binary_labels[:, i], binary_predictions[:, i])
+
+            # A "micro-average": quantifying score on all classes jointly
+            precision["micro"], recall["micro"], _ = precision_recall_curve(binary_labels.ravel(),
+                                                                            binary_predictions.ravel())
+            average_precision["micro"] = average_precision_score(binary_labels, binary_predictions,
+                                                                 average="micro")
+
+            print('Average precision score, micro-averaged over all classes: {0:0.2f}'
+                  .format(average_precision["micro"]))
+
+        except Exception:
+            print("Exception calucating precision/recall.")
+
+        predictions_df["Exact Match"] = exact_match
+        predictions_df["Single Miss"] = single_miss
+        predictions_df["Double Miss"] = double_miss
+        predictions_df["Accuracy"] = accuracy
+        predictions_df["Num Labels"] = num_labels
+        predictions_df["Predicted Num Labels"] = predicted_num_labels
+        predictions_df["Num Labels Matching"] = num_labels_matching
+        predictions_df["Additional Labels"] = np.array(predicted_num_labels) - np.array(num_labels_matching)
+        predictions_df.sort_values(by=["Exact Match", "Single Miss", "Double Miss"], ascending=False, inplace=True)
+
+        print("------------------------------------------------------------")
+        print("Precision", precision)
+        print("Recall", recall)
+        print()
+        print("Micro Precision",precision["micro"])
+        print("Micro Recall",recall["micro"])
+        print("Average Precision", average_precision)
+        print("------------------------------------------------------------")
+        print("Exact Match:", sum(exact_match) / len(exact_match))
+        print("Single Miss:", sum(single_miss) / len(single_miss))
+        print("Accuracy:", sum(accuracy) / len(accuracy))
+
+
+
+        return predictions_df
+
+    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False):
+
+        overview_encoded_data = None
+        subtitle_encoded_data = None
         if data is not None:
             if load_encoded_data:
                 print("Loading encoded data for efficiency...")
@@ -478,7 +646,10 @@ class GenrePredictionModel():
                 overview_encoded_data = self.load_pickle_data("data/weights/overview_encoded_data.dat")
                 subtitle_encoded_data = self.load_pickle_data("data/weights/subtitle_encoded_data.dat")
             else:
-                overview_encoded_data, subtitle_encoded_data = self.preprocess(data, save_encoded_data=save_encoded_data)
+                if not simple:
+                    overview_encoded_data, subtitle_encoded_data = self.preprocess(data, save_encoded_data=save_encoded_data)
+                else:
+                    subtitle_encoded_data =  self.preprocess_simple(data, max_length=MAX_TEXT_LENGTH)
 
             labels = data["Labels"].apply(
                 self.parse_str_labels)
@@ -491,7 +662,10 @@ class GenrePredictionModel():
 
             print("Starting Predictions")
 
-            X = [overview_encoded_data, subtitle_encoded_data]
+            if simple:
+                X = subtitle_encoded_data
+            else:
+                X = [overview_encoded_data, subtitle_encoded_data]
 
             raw_predictions = self.model.predict(X, batch_size=batch_size, verbose=1)
 
@@ -582,9 +756,9 @@ class GenrePredictionModel():
 
 if __name__ == "__main__":
 
-    evaluate = False
-    train = True
-    load_weights = False
+    evaluate = True
+    train = False
+    load_weights = True
     use_val = True
 
     vectorizer = MultiVectorizer() #glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
@@ -592,7 +766,7 @@ if __name__ == "__main__":
     training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots.xlsx", no_nan_overview_plot=False)
 
     if evaluate:
-        evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=3)
+        evaluation_df = genre_prediction.evaluate_simple(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=35)
         evaluation_df.to_excel("data/validation_evaluation.xlsx", index=False)
 
     if train:
