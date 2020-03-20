@@ -72,7 +72,7 @@ class GenrePredictionModel():
         else:
             training_df = filtered_data_df[filtered_data_df.Training == True].reset_index(drop=True)
             validation_df = filtered_data_df[filtered_data_df.Validation == True].reset_index(drop=True)
-            #validation_df = validation_df.query("Overview.notna()").reset_index(drop=True)
+            validation_df = validation_df.query("Overview.notna()").reset_index(drop=True)
 
         training_df["Labels"] = training_df["Genres"].apply(self.parse_str_labels)
         validation_df["Labels"] = validation_df["Genres"].apply(self.parse_str_labels)
@@ -268,7 +268,8 @@ class GenrePredictionModel():
         max_pool = MaxPooling1D(pool_size=3, name="MaxPooling1D")(cnn_1)
         dropout = SpatialDropout1D(0.2, name="SpatialDropoutMaxPool")(max_pool)
         flatten = Flatten(name="Flatten")(dropout)
-        output = Dense(number_of_labels, activation="sigmoid", name="Output")(flatten)
+        dropout = Dropout(0.5)(flatten)
+        output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropout)
         self.model = Model(text_input, output)
         self.model.compile(loss='binary_crossentropy',
                       optimizer='adam',
@@ -637,7 +638,7 @@ class GenrePredictionModel():
 
         return predictions_df
 
-    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False, threshold=0.38):
+    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False, threshold=0.50):
 
         overview_encoded_data = None
         subtitle_encoded_data = None
@@ -761,7 +762,7 @@ if __name__ == "__main__":
 
     evaluate = False
     train = True
-    load_weights = True
+    load_weights = False
     use_val = True
 
     vectorizer = MultiVectorizer() #glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
