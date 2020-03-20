@@ -25,6 +25,7 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras import backend as K
 print(K.image_data_format())
 K.set_image_data_format('channels_last')
+import tensorflow_addons as tfa
 
 class GenrePredictionModel():
     def __init__(self, vectorizer=None, load_weights=False):
@@ -268,12 +269,14 @@ class GenrePredictionModel():
         dropout = SpatialDropout1D(0.2, name="SpatialDropoutMaxPool")(max_pool)
         flatten = Flatten(name="Flatten")(dropout)
         output = Dense(number_of_labels, activation="sigmoid", name="Output")(flatten)
-        model = Model(text_input, output)
-        model.compile(loss='binary_crossentropy',
-                      optimizer='adamax',
+        self.model = Model(text_input, output)
+        self.model.compile(loss='binary_crossentropy',
+                      optimizer='adam',
                       metrics=self.METRICS)
-        model.summary()
-        return model
+        self.model.summary()
+        if self.load_weights:
+            self.model.load_weights("data/weights/very_simple_model_1.h5")
+        return self.model
 
     def very_simple_model(self, embedding_size=300, number_of_labels=130):
         text_input = Input(shape=(MAX_TEXT_LENGTH,), dtype='int32', name="TextInput")
@@ -384,7 +387,7 @@ class GenrePredictionModel():
             validation_data = (subtitles_validation_input, validation_labels)
             assert len(subtitles_validation_input.shape) == 2
 
-        self.model = self.very_simple_model(number_of_labels=len(self.genres))
+        self.model = self.very_simple_model_version_1(number_of_labels=len(self.genres))
 
         callback_actions = self.CallbackActions(main_model=self.model, vectorizer=self.vectorizer)
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path,
@@ -418,7 +421,7 @@ class GenrePredictionModel():
                  save_encoded_data=False):
         binary_predictions = None
 
-        self.sentence_model, self.model = self.get_two_input_model(number_of_labels=len(self.genres))
+        self.sentence_model, self.model = self.very_simple_model_version_1(number_of_labels=len(self.genres))
 
         if file_path is not None:
             predictions_df = pd.read_excel(file_path)
@@ -634,7 +637,7 @@ class GenrePredictionModel():
 
         return predictions_df
 
-    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False, threshold=0.50):
+    def predict(self, data, batch_size=1, output_vectors=False, output_subtitle_vectors=False, simple=True, data_type="", load_encoded_data=False, save_encoded_data=False, threshold=0.38):
 
         overview_encoded_data = None
         subtitle_encoded_data = None
@@ -678,12 +681,6 @@ class GenrePredictionModel():
             for i, prediction in enumerate(raw_predictions):
                 indexes = [i for i, x in enumerate(prediction) if x >= threshold]
                 binary_prediction = [1 if x >= threshold else 0 for i, x in enumerate(prediction)]
-
-                while len(indexes) == 0:
-                    threshold = (threshold - 0.05)
-                    print("Threshold:",threshold)
-                    indexes = [i for i, x in enumerate(prediction) if x >= threshold]
-                    binary_prediction = [1 if x >= threshold else 0 for i, x in enumerate(prediction)]
 
                 if len(indexes) > 0:
                     pred_text = itemgetter(*indexes)(self.genres)
@@ -752,18 +749,18 @@ class GenrePredictionModel():
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.main_model.save_weights("data/weights/very_simple_model.h5")
+            self.main_model.save_weights("data/weights/very_simple_model_1.h5")
 
             if self.sentence_model is not None:
                 self.sentence_model.save_weights("data/weights/sentence_model.h5")
 
-            self.vectorizer.save("data/weights/vectorizer.dat")
+            self.vectorizer.save("data/weights/vectorizer_very_simple_model_1.dat")
             return
 
 if __name__ == "__main__":
 
-    evaluate = True
-    train = False
+    evaluate = False
+    train = True
     load_weights = True
     use_val = True
 
@@ -777,7 +774,7 @@ if __name__ == "__main__":
 
     if train:
         genre_prediction.fit_simple(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df,
-                                                                            validation_labels=genre_prediction.validation_labels, epochs=2000, batch_size=35)
+                                                                            validation_labels=genre_prediction.validation_labels, epochs=2000, batch_size=14)
 
         #genre_prediction.fit(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df, validation_labels = genre_prediction.validation_labels, epochs=1200, batch_size=2, save_encoded_data=True)
 
