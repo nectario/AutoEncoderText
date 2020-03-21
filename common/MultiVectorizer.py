@@ -10,6 +10,7 @@ from common.data_utils import convert_to_string
 from orderedset import OrderedSet
 #from spellchecker import Spellchecker
 import pandas as pd
+from nltk.corpus import stopwords
 
 class MultiVectorizer():
 
@@ -18,10 +19,11 @@ class MultiVectorizer():
     embedding_word_vector = {}
     glove = False
 
-    def __init__(self, reserved=None, min_occur=1, glove_path=None, tokenizer=None, embedding_size=300):
+    def __init__(self, reserved=None, min_occur=1, use_bert=False, glove_path=None, tokenizer=None, embedding_size=300):
 
         self.mi_occur = min_occur
         self.embedding_size = embedding_size
+        self.use_bert = use_bert
 
         self.nlp = spacy.load("en")
         if tokenizer is None:
@@ -81,6 +83,22 @@ class MultiVectorizer():
             document_tokens.append(section_tokens)
         return document_tokens
 
+    def fit_bert_sentences(self, samples, remove_stop_words=True):
+        output_tokens = []
+        vocab = []
+        stop_words = set(stopwords.words('english'))
+        for sample in tqdm(samples):
+            sentence_tokens = []
+            for sentence in sample:
+                tokens = self.tokenizer.tokenize(sentence.lower())
+                tokens = [w for w in tokens if not w in stop_words]
+                tokens = ["[CLS]"] + tokens + ["[SEP]"]
+                sentence_tokens.append(tokens)
+                vocab.append(tokens)
+            output_tokens.append(sentence_tokens)
+        #self.vocabulary.add_documents(vocab)
+        return output_tokens
+
     def fit_samples_with_sentences(self, samples, remove_stop_words=True):
         output_tokens = []
         vocab = []
@@ -99,7 +117,10 @@ class MultiVectorizer():
 
     def fit(self, X, remove_stop_words=True, list_of_lists=False):
         if list_of_lists:
-            x_tokens = self.fit_samples_with_sentences(X,remove_stop_words=remove_stop_words) #self.fit_document(X)
+            if not self.use_bert:
+                x_tokens = self.fit_samples_with_sentences(X,remove_stop_words=remove_stop_words) #self.fit_document(X)
+            else:
+                x_tokens = self.fit_bert_sentences(X, remove_stop_words=remove_stop_words)
         else:
             x_tokens = self.fit_text(X)
 
@@ -135,7 +156,7 @@ class MultiVectorizer():
     def fit_text(self, X, remove_stop_words=True):
         output_tokens = []
         for sample in tqdm(X):
-            tokens = self.tokenizer(sample.lower())
+            tokens = self.tokenizer.tokenize(sample.lower())
             if remove_stop_words:
                 tokens = [token for token in tokens if not token.is_stop]
             word_str_tokens = list(map(convert_to_string, tokens))
@@ -148,14 +169,17 @@ class MultiVectorizer():
 
     def transform(self, X, list_of_lists=False):
         if list_of_lists:
-            return self.transform_list_of_list(X)
+            if not self.use_bert:
+                return self.transform_list_of_list(X)
+            else:
+                return self.transform_bert(X)
         else:
-            return self.transform_section(X)
+            return self.transform_text(X)
 
     def transform_list_of_list(self, samples):
         samples_tokens = []
         for sample in samples:
-            encoded_tokens = self.transform_section(sample)
+            encoded_tokens = self.transform_text(sample)
             samples_tokens.append(encoded_tokens)
         return samples_tokens
 
@@ -169,14 +193,17 @@ class MultiVectorizer():
                     encoded_tokens.append(section)
                     if len(encoded_tokens) == len(document):
                         section_tokens.append(encoded_tokens)
-                        section_tokens = self.transform_section(section_tokens)
+                        section_tokens = self.transform_text(section_tokens)
                 else:
-                    encoded_tokens = self.transform_section(section)
+                    encoded_tokens = self.transform_text(section)
                     section_tokens.append(encoded_tokens)
             document_tokens.append(section_tokens)
         return document_tokens
 
-    def transform_section(self, X):
+    def transform_bert(self, tokens):
+        return self.tokenizer.convert_tokens_to_ids(tokens)
+
+    def transform_text(self, X):
         if hasattr(self, "limit"):
             return [[i if i < self.limit else self.reserved.index("<UNK>")
                      for i in self.vocabulary.doc2idx(x, unknown_word_index=self.reserved.index("<UNK>"))]
