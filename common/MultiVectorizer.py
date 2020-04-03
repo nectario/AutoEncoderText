@@ -151,12 +151,13 @@ class MultiVectorizer():
         unknown_words_df = pd.DataFrame()
         unknown_words_df["Unknown Words"] = unknown_words
         unknown_words_df.to_excel("data/unknown_words.xlsx", index=False)
-        return  self.transform(x_tokens, list_of_lists=list_of_lists)
+        encoded_tokens = self.transform(x_tokens, list_of_lists=list_of_lists)
+        return  encoded_tokens
 
     def fit_text(self, X, remove_stop_words=True):
         output_tokens = []
         for sample in tqdm(X):
-            tokens = self.tokenizer.tokenize(sample.lower())
+            tokens = self.tokenizer(sample.lower())
             if remove_stop_words:
                 tokens = [token for token in tokens if not token.is_stop]
             word_str_tokens = list(map(convert_to_string, tokens))
@@ -200,8 +201,15 @@ class MultiVectorizer():
             document_tokens.append(section_tokens)
         return document_tokens
 
-    def transform_bert(self, tokens):
-        return self.tokenizer.convert_tokens_to_ids(tokens)
+    def transform_bert(self, samples):
+        samples_tokens = []
+        for sample in samples:
+            encoded_sentences = []
+            for sentence_tokens in sample:
+                encoded_tokens = self.tokenizer.convert_tokens_to_ids(sentence_tokens)
+                encoded_sentences.append(encoded_tokens)
+            samples_tokens.append(encoded_sentences)
+        return samples_tokens
 
     def transform_text(self, X):
         if hasattr(self, "limit"):
