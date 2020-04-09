@@ -150,7 +150,6 @@ class MultiVectorizer():
         print("Number of unknown words:",len(unknown_words))
         unknown_words_df = pd.DataFrame()
         unknown_words_df["Unknown Words"] = unknown_words
-        unknown_words_df.to_excel("data/unknown_words.xlsx", index=False)
         encoded_tokens = self.transform(x_tokens, list_of_lists=list_of_lists)
         return  encoded_tokens
 
