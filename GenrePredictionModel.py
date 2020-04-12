@@ -62,10 +62,8 @@ class GenrePredictionModel():
         ]
 
         self.checkpoint_path = "J:/GenrePrediction/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
-        #self.best_checkpoint = "data/weights/checkpoints/cp-epoch_04-accuracy_0.985_val_precision_0.457-val_recall_0.114-val_auc_0.880.ckpt.index"
         self.checkpoint_dir = os.path.dirname(self.checkpoint_path)
         print("Checkpoint dir:",self.checkpoint_dir)
-        #self.checkpoint_weights = tf.train.checkpoints_iterator() load_checkpoint(self.best_checkpoint) #latest_checkpoint(self.checkpoint_dir)
 
     def remove_unused_genres(self, genre_list, genres):
         if (type(genre_list) == str):
@@ -86,6 +84,7 @@ class GenrePredictionModel():
         train_ids = train_ids.set_index("Id")
         test_ids = test_ids.set_index("Id")
         data_df = data_df.set_index("Id")
+
         data_df["Id"] = data_df.index
 
         data_df = data_df[data_df.index.isin(train_ids.append(test_ids).index)][["Id","Title", "Genres", "Subtitles 1", "Subtitles 2"]]
@@ -95,8 +94,10 @@ class GenrePredictionModel():
         data_df.replace("vislted", "visited", inplace=True)
         data_df.replace(r'[^\x00-\x7F]+', ' ', inplace=True, regex=True)
         data_df.replace(0, "", inplace=True)
+        data_df["Subtitles 2"].fillna("", inplace=True)
+        data_df["Subtitles 1"].fillna("", inplace=True)
         data_df["Subtitles"] = data_df["Subtitles 1"] + data_df["Subtitles 2"]
-        data_df = data_df.query(r"(Subtitles.notna())")
+        data_df = data_df[data_df.Subtitles != ""]
 
         #data_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
 
@@ -115,65 +116,6 @@ class GenrePredictionModel():
         self.validation_labels = validation_binary_labels
 
         return training_data_df, validation_data_df
-
-    # def load_data(self, file_path, rows=None, validation_data_filepath=None, validation_split=None, no_nan_overview_plot=True):
-    #     data_df = pd.read_excel(file_path, nrows=rows)
-    #     train_ids = pd.read_excel("data/train_ids.xlsx")
-    #     test_ids = pd.read_excel("data/test_ids.xlsx")
-    #
-    #     data_df = data_df.set_index("Id")
-    #     train_ids = train_ids.set_index("Id")
-    #     test_ids = test_ids.set_index("Id")
-    #     training_data_df = data_df[data_df.index.isin(train_ids.index)]
-    #
-    #     validation_data_df = data_df[data_df.index.isin(test_ids.index)]
-    #
-    #     if validation_data_filepath is not None:
-    #         validation_data_df = pd.read_excel(validation_data_filepath)
-    #         validation_data_df.set_index("Id")
-    #         validation_data_df = validation_data_df[validation_data_df.index.isin(test_ids.index)]
-    #
-    #     data_df = data_df[data_df.Exclude == False].reset_index(drop=True)
-    #     data_df.replace("vislted", "visited", inplace=True)
-    #     data_df.replace(r'[^\x00-\x7F]+', ' ', inplace=True, regex=True)
-    #     data_df.replace(0, "", inplace=True)
-    #     filtered_data_df = data_df
-    #
-    #     filtered_data_df["Subtitles"] = filtered_data_df["Subtitles 1"] + filtered_data_df["Subtitles 2"]
-    #     filtered_data_df = data_df.query(r"(Subtitles.notna())").reset_index(drop=True)
-    #     filtered_data_df.drop(["Subtitles 1", "Subtitles 2"], inplace=True, axis=1)
-    #     filtered_data_df["Overview"] = filtered_data_df["Overview"].apply(lambda x: x + " ") + filtered_data_df["Plot"]
-    #
-    #     if no_nan_overview_plot:
-    #         filtered_data_df = filtered_data_df.query("Overview.notna()").reset_index(drop=True)
-    #
-    #     if validation_split is not None:
-    #         filtered_data_df = filtered_data_df[filtered_data_df.Training == True].reset_index()
-    #         training_data_df = filtered_data_df[:int(1 - filtered_data_df.shape[0] * validation_split)].reset_index(drop=True)
-    #         validation_data_df = filtered_data_df[int(1 - filtered_data_df.shape[0] * validation_split) + 1: - 1].reset_index(drop=True)
-    #     else:
-    #         training_data_df = filtered_data_df[filtered_data_df.Training == True].reset_index(drop=True)
-    #         if validation_data_df is None:
-    #             validation_data_df = filtered_data_df[filtered_data_df.Validation == True].reset_index(drop=True)
-    #             validation_data_df = validation_data_df.query("Overview.notna()").reset_index(drop=True)
-    #
-    #     training_data_df["Labels"] = training_data_df["Genres"].apply(self.parse_str_labels)
-    #     validation_data_df["Labels"] = validation_data_df["Genres"].apply(self.parse_str_labels)
-    #
-    #     training_data_df.to_excel("data/training_data.xlsx")
-    #     # validation_data_df.to_excel("data/validation_data.xlsx", index=False)
-    #
-    #     self.genres = self.load_current_genres(file_path="data/20_genre_labels.xlsx")
-    #
-    #     mlb = MultiLabelBinarizer(classes=self.genres)
-    #
-    #     training_binary_labels = mlb.fit_transform(training_data_df["Labels"])
-    #     validation_binary_labels = mlb.fit_transform(validation_data_df["Labels"])
-    #
-    #     self.training_labels = training_binary_labels
-    #     self.validation_labels = validation_binary_labels
-    #
-    #     return training_data_df, validation_data_df
 
     def load_current_genres(self, file_path, load_original=False):
         if load_original:
@@ -442,7 +384,7 @@ class GenrePredictionModel():
         subtitles_input = Input(shape=(None, None), dtype='int64', name="SubtitlesInput")
         sentence_input = Input(shape=(None,), dtype='int64', name="SentenceInput")
 
-        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=False, name="Embedding")(sentence_input)
+        embedded_sentence = Embedding(self.vectorizer.get_vocabulary_size(), embedding_size, trainable=True, name="Embedding")(sentence_input)
         spatial_dropout_sentence = SpatialDropout1D(0.10, name="SpatialDropoutSentence")(embedded_sentence)
         cnn_sentence = Conv1D(220, 3, padding="same", activation="relu", strides=1, name="Conv1DSentence")(spatial_dropout_sentence)
         max_pool_sentence = MaxPooling1D(pool_size=3, name="MaxPooling1DSentence")(cnn_sentence)
@@ -483,7 +425,7 @@ class GenrePredictionModel():
         self.model = model
         if self.load_weights:
             #self.sentence_model.load_weights("J:/GenrePrediction/weights/sentence_model.h5")
-            self.model.load_weights("J:/GenrePrediction/weights/genre_prediction.h5")
+            self.model.load_weights("J:/GenrePrediction/weights/checkpoints/cp-epoch_52-accuracy_0.954_val_precision_0.506-val_recall_0.222-val_auc_0.806.ckpt")
         return sentence_model, model
 
 
