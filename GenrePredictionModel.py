@@ -61,7 +61,7 @@ class GenrePredictionModel():
             AUC(name='auc')
         ]
 
-        self.checkpoint_path = "J:/GenrePrediction/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
+        self.checkpoint_path = "N:/weights/checkpoints/cp-epoch_{epoch:02d}-accuracy_{accuracy:.3f}_val_precision_{val_precision:.3f}-val_recall_{val_recall:.3f}-val_auc_{val_auc:.3f}.ckpt"
         self.checkpoint_dir = os.path.dirname(self.checkpoint_path)
         print("Checkpoint dir:",self.checkpoint_dir)
 
@@ -324,16 +324,9 @@ class GenrePredictionModel():
         sentence_input = Input(shape=(max_seq_len,), dtype='float32', name="sentence_input_ids")
         subtitles_input = Input(shape=(self.max_shape[1], max_seq_len), dtype='int32', name="SubtitlesInput")
 
-        # token_type_ids = keras.layers.Input(shape=(max_seq_len,), dtype='int32', name="token_type_ids")
-        # output         = bert([sentence_input_ids, token_type_ids])
-
         bert_output = bert(sentence_input)
-        bert_output = Attention()([bert_output, sentence_input])
         bert_output = GlobalAveragePooling1D()(bert_output)
 
-        #bert_output = LSTM(20)(bert_output)
-        #bert_output = LSTM(256)(bert_output)
-        #bert_out_subset = Lambda(lambda seq: seq[:, 0, :])(bert_output)
         self.bert_sentence_model = Model(sentence_input, bert_output)
 
         segment_time_distributed = TimeDistributed(self.bert_sentence_model, name="TimeDistributedSegment")
@@ -419,13 +412,23 @@ class GenrePredictionModel():
                       optimizer='adamax',
                       metrics=self.METRICS)
 
+
+
+
         print(sentence_model.summary())
         print(model.summary())
         self.sentence_model = sentence_model
         self.model = model
         if self.load_weights:
-            #self.sentence_model.load_weights("J:/GenrePrediction/weights/sentence_model.h5")
-            self.model.load_weights("J:/GenrePrediction/weights/checkpoints/cp-epoch_52-accuracy_0.954_val_precision_0.506-val_recall_0.222-val_auc_0.806.ckpt")
+            sentence_weights = "N:/weights/sentence_model.h5"
+            weight_file = "N:/weights/genre_prediction.h5"
+            print("Loading weights",weight_file)
+            print("Loading weights", sentence_weights)
+            self.sentence_model.load_weights(sentence_weights)
+            self.model.load_weights(weight_file)
+
+        self.model_vectors = Model(subtitles_input, subtitles_avg_output)
+
         return sentence_model, model
 
 
@@ -498,7 +501,7 @@ class GenrePredictionModel():
                  save_encoded_data=False, threshold=0.5):
 
         binary_predictions = None
-        self.sentence_model, self.model = self.very_simple_model_version_1(number_of_labels=len(self.genres))
+        self.sentence_model, self.model = self.get_one_input_model(number_of_labels=len(self.genres))
 
         if file_path is not None:
             predictions_df = pd.read_excel(file_path)
@@ -736,20 +739,20 @@ class GenrePredictionModel():
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.main_model.save_weights("J:/GenrePrediction/weights/genre_prediction.h5")
+            self.main_model.save_weights("N:/weights/genre_prediction.h5")
 
             if self.sentence_model is not None:
-                self.sentence_model.save_weights("J:/GenrePrediction/weights/sentence_model.h5")
+                self.sentence_model.save_weights("N:/weights/sentence_model.h5")
 
             if epoch == 1:
-                self.vectorizer.save("J:/GenrePrediction/weights/vectorizer.dat")
+                self.vectorizer.save("N:/weights/vectorizer.dat")
             return
 
 if __name__ == "__main__":
 
     evaluate = False
     train = True
-    load_weights = True
+    load_weights = False
 
     #vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
 
