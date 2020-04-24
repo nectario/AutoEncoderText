@@ -1,48 +1,46 @@
-import os
 #os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+import math
+import time
 from collections import Counter
 from operator import itemgetter
 
 import tensorflow as tf
-from common.MultiVectorizer import *
-import pandas as pd
-from tensorflow.keras.layers import Dense, Embedding, Input, LSTM, TimeDistributed, SpatialDropout1D, Conv1D, MaxPooling1D, Dropout, AdditiveAttention, Attention, \
-    GlobalAveragePooling1D, Concatenate, Bidirectional, GlobalMaxPool1D, Reshape, RepeatVector, Masking, Flatten, Lambda, Layer
-from tensorflow.keras.models import Model
-from common.data_utils import *
-from tensorflow.keras.callbacks import Callback
-from sklearn.preprocessing import MultiLabelBinarizer
-from tqdm._tqdm_notebook import tqdm_notebook
-from tensorflow.keras.metrics import *
-from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
-from tensorflow.keras.preprocessing.text import one_hot
-import time
-from tensorflow.keras.layers import *
+from sklearn.metrics import precision_recall_curve
+from sklearn.preprocessing import MultiLabelBinarizer
 from tensorflow.keras import *
-from tensorflow.keras.losses import *
-from tensorflow.keras.metrics import *
 from tensorflow.keras.callbacks import *
-import math
+from tensorflow.keras.layers import *
+from tensorflow.keras.metrics import *
+from tqdm._tqdm_notebook import tqdm_notebook
+
+from common.MultiVectorizer import *
+from common.data_utils import *
+
+MAX_WORDS = 100
+MAX_SENTENCES = 200
+
 MAX_TEXT_LENGTH = 12500
 tqdm_notebook.pandas()
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras import backend as K
 print(K.image_data_format())
 K.set_image_data_format('channels_last')
-import tensorflow_addons as tfa
-import bert
+
 from bert import BertModelLayer
-from bert.loader import StockBertConfig, map_stock_config_to_params, load_stock_weights
 from bert.tokenization.bert_tokenization import FullTokenizer
+from bert import params_from_pretrained_ckpt
+
 import re
-from BertLayer import *
+
+unknown_words = set()
 
 class GenrePredictionModel():
     def __init__(self, vectorizer=None, load_weights=False, use_bert=True, bert_model_name=None):
         self.bert_model_name = bert_model_name
 
         if use_bert:
+            self.vocabulary = set(line.strip() for line in open("D:/Development/Projects/bert_models/"+self.bert_model_name+"/vocab.txt", encoding="utf-8"))
             self.bert_tokenizer = FullTokenizer(vocab_file=os.path.join("D:/Development/Projects/bert_models/"+self.bert_model_name, "vocab.txt"))
             self.vectorizer = MultiVectorizer(tokenizer=self.bert_tokenizer, use_bert=use_bert)
         else:
@@ -52,7 +50,7 @@ class GenrePredictionModel():
         self.max_shape = None
 
         if self.load_weights:
-            self.vectorizer = self.vectorizer.load("J:/GenrePrediction/weights/vectorizer.dat")
+            self.vectorizer = self.vectorizer.load("data/weights/vectorizer.dat")
 
         self.METRICS = [
             BinaryAccuracy(name='accuracy'),
@@ -76,7 +74,7 @@ class GenrePredictionModel():
     def load_data(self, file_path, rows=None):
 
         data_df = pd.read_excel(file_path, nrows=rows)
-        self.genres = self.load_current_genres(file_path="data/20_genre_labels.xlsx")
+        self.genres = self.load_current_genres(file_path="data/93_labels_data/new_93_genres.xlsx")
 
         train_ids = pd.read_excel("data/train_ids.xlsx")
         test_ids = pd.read_excel("data/test_ids.xlsx")
@@ -87,9 +85,9 @@ class GenrePredictionModel():
 
         data_df["Id"] = data_df.index
 
-        data_df = data_df[data_df.index.isin(train_ids.append(test_ids).index)][["Id","Title", "Genres", "Subtitles 1", "Subtitles 2"]]
+        data_df = data_df[data_df.index.isin(train_ids.append(test_ids).index)][["Id","Title", "Labels", "Subtitles 1", "Subtitles 2"]]
 
-        data_df["Labels"] = data_df["Genres"].apply(self.remove_unused_genres, args=(self.genres,)).tolist()
+        #data_df["Labels"] = data_df["Labels"].apply(self.remove_unused_genres, args=(self.genres,)).tolist()
 
         data_df.replace("vislted", "visited", inplace=True)
         data_df.replace(r'[^\x00-\x7F]+', ' ', inplace=True, regex=True)
@@ -104,13 +102,16 @@ class GenrePredictionModel():
         training_data_df = data_df[data_df.index.isin(train_ids.index)]
         validation_data_df = data_df[data_df.index.isin(test_ids.index)]
 
-        training_data_df.to_excel("data/train_data.xlsx", index=False)
-        validation_data_df.to_excel("data/test_data.xlsx", index=False)
+        #training_data_df.to_excel("data/train_data.xlsx", index=False)
+        #validation_data_df.to_excel("data/test_data.xlsx", index=False)
 
         mlb = MultiLabelBinarizer(classes=self.genres)
 
-        training_binary_labels = mlb.fit_transform(training_data_df["Labels"])
-        validation_binary_labels = mlb.fit_transform(validation_data_df["Labels"])
+        training_data_df["List Labels"] = training_data_df["Labels"].apply(self.parse_str_labels)
+        validation_data_df["List Labels"] = validation_data_df["Labels"].apply(self.parse_str_labels)
+
+        training_binary_labels = mlb.fit_transform(training_data_df["List Labels"])
+        validation_binary_labels = mlb.fit_transform(validation_data_df["List Labels"])
 
         self.training_labels = training_binary_labels
         self.validation_labels = validation_binary_labels
@@ -123,7 +124,7 @@ class GenrePredictionModel():
                 genres = pickle.load(f)
                 return genres
         current_genres_df = pd.read_excel(file_path)
-        genres = current_genres_df["Genres"].tolist()
+        genres = current_genres_df["Genre"].tolist()
         return genres
 
     def get_sentences(self, text):
@@ -132,9 +133,34 @@ class GenrePredictionModel():
         return sentences
 
     def clean_text(self, text):
-        punctuation = '.,():-—;"!?•$%@“”#<>+=/[]*^\'{}_■~\\|«»©&~`£·'
+
         atext = text.replace('-', ' ')
-        return atext.strip(punctuation).lower().replace(",","").replace(":","")
+        atext = atext.lower()
+        atext = atext.replace("there's", "there is")
+        atext = atext.replace("she's", "she is")
+        atext = atext.replace("he's", "he is")
+        atext = atext.replace("I'm", "I am")
+        atext = atext.replace("could've", "could have")
+        atext = atext.replace("wasn't", "was not")
+        atext = atext.replace("doesn't", "does not")
+        atext = atext.replace("hadn't", "had not")
+        atext = atext.replace("didn't", "did not")
+        atext = atext.replace("isn't", "is not")
+        atext = atext.replace("isnt", "is not")
+        atext = atext.replace("didnt", "did not")
+        atext = atext.replace("hadnt", "had not")
+        atext = atext.replace("doesnt", "does not")
+        atext = atext.replace("shes", "she is")
+        atext = atext.replace("hes", "he is")
+
+
+        clean_text = re.sub('[^A-Za-z0-9 ]+', '', atext)
+
+        for word in clean_text.split():
+            if word not in self.vocabulary:
+                unknown_words.add(word)
+
+        return clean_text
 
     def get_chunks(self, text):
         text = str(text if type(text) == str else "")
@@ -150,7 +176,7 @@ class GenrePredictionModel():
             sentence_text = re.sub(regx_2, "", sentence_text)
             chunk = chunk + " " + sentence_text if chunk != "" else sentence_text
             chunk = self.clean_text(chunk)
-            if len(chunk) >= 100 and  i != len(sentences) - 1:
+            if len(chunk) >= MAX_WORDS and  i != len(sentences) - 1:
                 chunks.append(chunk)
                 lengths.append(len(chunk))
                 chunk = ""
@@ -163,13 +189,6 @@ class GenrePredictionModel():
         labels = list(map(str.strip, str_labels.split(",")))
         return labels
 
-    # def parse_str_labels(self, str_labels):
-    #     if type(str_labels) == list:
-    #         return str_labels
-    #     if type(str_labels) != str:
-    #         return []
-    #     labels = list(map(str.strip, str_labels.split(",")))
-    #     return labels
 
     def to_str(self, label_list):
         return str(label_list).replace("'","").replace("[","").replace("]","")
@@ -212,8 +231,8 @@ class GenrePredictionModel():
             print("Most common sentences:", most_common_sents)
             print("Most common words:", most_common_words)
 
-        chosen_words = 140
-        chosen_sents = 500
+        chosen_words = MAX_WORDS
+        chosen_sents = MAX_SENTENCES
 
         shape = (batch_size, chosen_sents, chosen_words)
         result = np.full(shape, fill_value, dtype="float32")
@@ -260,7 +279,7 @@ class GenrePredictionModel():
             timestr = time.strftime("%m%d")
 
             subtitles_data = self.pad_list_of_lists(subtitles_data)
-            self.save_pickle_data(subtitles_data, file_path="J:/GenrePrediction/"+data_type+"_subtitles_encoded_data.dat")
+            self.save_pickle_data(subtitles_data, file_path="data"+data_type+"_subtitles_encoded_data.dat")
 
             return subtitles_data
 
@@ -313,61 +332,91 @@ class GenrePredictionModel():
 
         return learning_rate_scheduler
 
-    def bert_model(self, max_seq_len, number_of_labels=130, adapter_size=64, bert_config_file=None, bert_ckpt_file=None, bert_model_name=None):
+    def example(self):
+
+        # Encode each timestep
+        in_sentence = Input(shape=(None,),  dtype='int64', name="Input1")
+        embedded_sentence = Embedding(1000, 300, trainable=False)(in_sentence)
+        lstm_sentence = LSTM(300)(embedded_sentence)
+        sentence_model = Model(in_sentence, lstm_sentence)
+
+        section_input = Input(shape=(None, None), dtype='int64', name="Input2")
+        section_encoded = TimeDistributed(sentence_model)(section_input)
+        section_encoded = LSTM(300)(section_encoded)
+        section_encoded = Dense(1)(section_encoded)
+        section_model = Model(section_input, section_encoded)
+
+        section_model.compile(loss='mse',
+                      optimizer='adam',
+                      metrics=['accuracy'])
+
+        print(sentence_model.summary())
+        print(section_model.summary())
+        return section_model
+
+    def bert_2(self,  bert_config_file=None, bert_ckpt_file=None):
+        with tf.io.gfile.GFile(bert_config_file, "r") as reader:
+            bert_params = params_from_pretrained_ckpt(bert_ckpt_file)
+            l_bert = BertModelLayer.from_params(bert_params, name="bert")
+            #l_bert.apply_adapter_freeze()
+            #l_bert.embeddings_layer.trainable = False
+
+        in_sentence = Input(shape=(150,), dtype='int64', name="Input1")
+
+        bert_output = l_bert(in_sentence)
+
+        lstm_output = GlobalAveragePooling1D()(bert_output)
+        sentence_model = Model(in_sentence, lstm_output)
+
+        section_input = Input(shape=(300, 150), dtype='int64', name="Input2")
+        section_encoded = TimeDistributed(sentence_model)(section_input)
+        section_encoded = LSTM(300)(section_encoded)
+        section_encoded = Dense(21)(section_encoded)
+        section_model = Model(section_input, section_encoded)
+
+        section_model.compile(optimizer="adam",
+                           loss="binary_crossentropy")
+
+        sentence_model.summary()
+        section_model.summary()
+
+        return section_model
+
+
+
+    def bert_model(self, max_seq_len, number_of_labels=93, adapter_size=64, bert_config_file=None, bert_ckpt_file=None, bert_model_name=None):
 
         with tf.io.gfile.GFile(bert_config_file, "r") as reader:
-            bc = StockBertConfig.from_json_string(reader.read())
-            bert_params = map_stock_config_to_params(bc)
-            bert_params.adapter_size = adapter_size
-            bert = BertModelLayer.from_params(bert_params, name="bert")
+            bert_params = params_from_pretrained_ckpt(bert_ckpt_file)
+            l_bert = BertModelLayer.from_params(bert_params, name="bert")
 
-        sentence_input = Input(shape=(max_seq_len,), dtype='float32', name="sentence_input_ids")
-        subtitles_input = Input(shape=(self.max_shape[1], max_seq_len), dtype='int32', name="SubtitlesInput")
+        sentence_input = Input(shape=(MAX_WORDS,), dtype='float32', name="sentence_input_ids")
 
-        bert_output = bert(sentence_input)
+        bert_output = l_bert(sentence_input)
         bert_output = GlobalAveragePooling1D()(bert_output)
 
-        self.bert_sentence_model = Model(sentence_input, bert_output)
+        self.bert_model = Model(sentence_input, bert_output)
 
-        segment_time_distributed = TimeDistributed(self.bert_sentence_model, name="TimeDistributedSegment")
-        segment_cnn = Conv1D(256, 2, padding="same", strides=1, activation="relu", name="Segment2Conv1D")
-        segment_max_pool_2 = MaxPooling1D(pool_size=3, name="Segment2MaxPool1D")
+        chunk_input = Input(shape=(MAX_SENTENCES, MAX_WORDS), dtype='int32', name="SubtitlesInput")
 
-        subtitles_timedistributed = segment_time_distributed(subtitles_input)
-        subtitles_cnn = segment_cnn(subtitles_timedistributed)
-        subtitles_maxpool = segment_max_pool_2(subtitles_cnn)
+        chunk_timedistributed = TimeDistributed(self.bert_model, name="TimeDistributedSegment")(chunk_input)
+        chunk_cnn = Conv1D(256, 2, padding="same", strides=1, activation="relu", name="Segment2Conv1D")(chunk_timedistributed)
+        cnn_output = MaxPooling1D(pool_size=3, name="Segment2MaxPool1D")(chunk_cnn)
+        cnn_output = GlobalAveragePooling1D()(cnn_output)
+        dense = Dense(512, activation="sigmoid", name="dense")(cnn_output)
 
-        subtitles_dropout = SpatialDropout1D(0.30, name="SubtitlesDropout")(subtitles_maxpool)
-        subtitles_pre_attention_output = Dense(256, name="SubtitlesPreAttnOutput")(subtitles_dropout)
+        dropput = Dropout(0.10)(dense)
 
-        attention_subtitles = Attention(name="SubtitlesAttention")([subtitles_pre_attention_output, subtitles_maxpool])
-
-        subtitles_max_output = GlobalMaxPool1D(name="GlobalMaxPoolSubitles")(attention_subtitles)
-        subtitles_avg_output = GlobalAveragePooling1D(name="GlobalAvgPoolSubitles")(attention_subtitles)
-
-        concat_output = Concatenate(axis=-1, name="OutputConcatenate")([subtitles_max_output, subtitles_avg_output])
-        dropput = Dropout(0.40)(concat_output)
         output = Dense(number_of_labels, activation="sigmoid", name="Output")(dropput)
 
-        # model = keras.Model(inputs=[sentence_input_ids, token_type_ids], outputs=logits)
-        # model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
-        self.model = Model(inputs=subtitles_input, outputs=output)
-        #self.model.build(input_shape=(None, max_seq_len))
-
-        # load the pre-trained model weights
-        load_stock_weights(bert, bert_ckpt_file)
-
-        # freeze weights if adapter-BERT is used
-        if adapter_size is not None:
-            self.freeze_bert_layers(bert)
-
+        self.model = Model(inputs=chunk_input, outputs=output)
         self.model.compile(optimizer="adam",
-                      loss="binary_crossentropy")
+                      loss="binary_crossentropy", metrics=self.METRICS)
 
-        self.bert_sentence_model.summary()
+        self.bert_model.summary()
         self.model.summary()
 
-        return self.bert_sentence_model, self.model
+        return self.bert_model, self.model
 
 
     def get_one_input_model(self, embedding_size=300, lstm_output_size=300, number_of_labels=21):
@@ -420,8 +469,8 @@ class GenrePredictionModel():
         self.sentence_model = sentence_model
         self.model = model
         if self.load_weights:
-            sentence_weights = "N:/weights/sentence_model.h5"
-            weight_file = "N:/weights/genre_prediction.h5"
+            sentence_weights = "data/weights/sentence_model.h5"
+            weight_file = "data/genre_prediction.h5"
             print("Loading weights",weight_file)
             print("Loading weights", sentence_weights)
             self.sentence_model.load_weights(sentence_weights)
@@ -436,8 +485,8 @@ class GenrePredictionModel():
 
         if load_encoded_data:
             print("Loading encoded data for efficiency...")
-            subtitles_input = self.load_pickle_data("J:/GenrePrediction/train_subtitles_encoded_data.dat")
-            subtitles_validation_input = self.load_pickle_data("J:/GenrePrediction/test_subtitles_encoded_data.dat")
+            subtitles_input = self.load_pickle_data("data/train_subtitles_encoded_data.dat")
+            subtitles_validation_input = self.load_pickle_data("data/test_subtitles_encoded_data.dat")
             validation_data = (subtitles_validation_input, validation_labels)
         else:
             print("Pre-processing training data...")
@@ -469,12 +518,18 @@ class GenrePredictionModel():
             subtitles_validation_input = self.preprocess(validation_data)
             validation_data = (subtitles_validation_input, validation_labels)
         self.max_shape = subtitles_input.shape
-        max_sentence_length = self.max_shape[2]
-        print("Max Sentence Length:", max_sentence_length)
-        self.sentence_model, self.model = self.bert_model(max_sentence_length, bert_ckpt_file="D:/Development/Projects/bert_models/"+self.bert_model_name+"/bert_model.ckpt", bert_config_file="D:/Development/Projects/bert_models/"+self.bert_model_name+"/bert_config.json", number_of_labels=len(self.genres))
 
-        callback_actions = self.CallbackActions(main_model=self.model, vectorizer=self.vectorizer)
-        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path,save_weights_only=True, verbose=1)
+        with open('data/unknown_words.txt', 'w') as f:
+            for word in unknown_words:
+                f.write(word + '\n')
+
+        print("Max Sentence Length:", MAX_WORDS)
+        self.bert_model, self.model = self.bert_model(MAX_WORDS, bert_ckpt_file="D:/Development/Projects/bert_models/"+self.bert_model_name,
+                                                          bert_config_file="D:/Development/Projects/bert_models/"+self.bert_model_name+"/bert_config.json",
+                                                          number_of_labels=len(self.genres))
+
+        callback_actions = self.CallbackActions(main_model=self.model, bert_model=self.bert_model, vectorizer=self.vectorizer)
+        #cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path,save_weights_only=True, verbose=1)
 
         log_dir = "log"
         tensorboard_callback = TensorBoard(log_dir=log_dir)
@@ -491,7 +546,7 @@ class GenrePredictionModel():
                                                             warmup_epoch_count=20,
                                                             total_epoch_count=epochs),
                              EarlyStopping(patience=20, restore_best_weights=True),
-                             tensorboard_callback, callback_actions, cp_callback])
+                             tensorboard_callback, callback_actions])
 
         self.model.save_weights('data/weights/model_bert.h5', overwrite=True)
 
@@ -636,18 +691,13 @@ class GenrePredictionModel():
         if data is not None:
             if load_encoded_data:
                 print("Loading encoded data for efficiency...")
-                print("data/overview_encoded_data.dat")
                 print("data/subtitle_encoded_data.dat")
-                overview_encoded_data = self.load_pickle_data("data/weights/overview_encoded_data.dat")
                 subtitle_encoded_data = self.load_pickle_data("data/weights/subtitle_encoded_data.dat")
             else:
                 if not simple:
                     overview_encoded_data, subtitle_encoded_data = self.preprocess(data, save_encoded_data=save_encoded_data)
                 else:
                     subtitle_encoded_data =  self.preprocess_simple(data, max_length=MAX_TEXT_LENGTH)
-
-            labels = data["Labels"].apply(
-                self.parse_str_labels)
 
             str_labels = data["Labels"].apply(
                 self.to_str)
@@ -723,10 +773,12 @@ class GenrePredictionModel():
             return binary_predictions, prediction_data_df
 
     class CallbackActions(Callback):
-        def __init__(self, main_model=None, sentence_model=None, vectorizer=None):
+        def __init__(self, main_model=None, sentence_model=None, bert_model=None, vectorizer=None):
             self.main_model = main_model
             self.sentence_model = sentence_model
             self.vectorizer = vectorizer
+            self.bert_model = bert_model
+
             return
 
         def on_train_begin(self, logs={}):
@@ -739,13 +791,16 @@ class GenrePredictionModel():
             return
 
         def on_epoch_end(self, epoch, logs={}):
-            self.main_model.save_weights("N:/weights/genre_prediction.h5")
+            self.main_model.save_weights("data/weights/main_model.h5")
+
+            if self.bert_model is not None:
+                self.bert_model.save_weights("data/weights/bert_model.h5")
 
             if self.sentence_model is not None:
-                self.sentence_model.save_weights("N:/weights/sentence_model.h5")
+                self.sentence_model.save_weights("data/weights/sentence_model.h5")
 
-            if epoch == 1:
-                self.vectorizer.save("N:/weights/vectorizer.dat")
+            #if epoch == 1:
+                #self.vectorizer.save("N:/weights/vectorizer.dat")
             return
 
 if __name__ == "__main__":
@@ -756,19 +811,21 @@ if __name__ == "__main__":
 
     #vectorizer = MultiVectorizer(glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
 
-    validation_data_filepath = "data/validation_data_2152.xlsx"
+    #validation_data_filepath = "data/validation_data_2152.xlsx"
 
     #if evaluate:
     #    evaluation_df = genre_prediction.evaluate(validation_data_df, binary_labels=genre_prediction.validation_labels, batch_size=7)
     #    evaluation_df.to_excel("data/validation_evaluation.xlsx", index=False)
 
-    bert = False
+    bert = True
 
     if bert:
-        genre_prediction = GenrePredictionModel(load_weights=load_weights, use_bert=True, bert_model_name="uncased_L-4_H-256_A-4")
-        training_data_df, validation_data_df = genre_prediction.load_data("data/film_data_lots_v2.xlsx")
+        genre_prediction = GenrePredictionModel(load_weights=load_weights, use_bert=True, bert_model_name="uncased_L-4_H-512_A-8")
+        training_data_df, validation_data_df = genre_prediction.load_data("data/93_labels_data/new_gold_data.xlsx")
+
+
         genre_prediction.fit_bert(training_data_df, genre_prediction.training_labels, validation_data=validation_data_df,
-                                                                        validation_labels=genre_prediction.validation_labels, epochs=1000, batch_size=1)
+                                                                        validation_labels=genre_prediction.validation_labels, epochs=1000, batch_size=1, save_encoded_data=True)
     else:
         vectorizer = MultiVectorizer()#glove_path="D:/Development/Embeddings/Glove/glove.840B.300d.txt")
         genre_prediction = GenrePredictionModel(vectorizer=vectorizer, load_weights=load_weights, use_bert=False)

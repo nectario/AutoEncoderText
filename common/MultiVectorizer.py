@@ -41,7 +41,10 @@ class MultiVectorizer():
             self.vocabulary = Dictionary([self.reserved])
 
     def get_vocabulary_size(self):
-        return len(self.vocabulary.token2id.items())
+        if not self.use_bert:
+            return len(self.vocabulary.token2id.items())
+        else:
+            return len(self.tokenizer.vocab.keys())
 
     def load_glove(self, glove_file_path):
         f = open(glove_file_path, encoding="utf-8")
@@ -60,13 +63,23 @@ class MultiVectorizer():
             return True
 
     def get_vocabulary(self):
-        return self.vocabulary
+        if not self.use_bert:
+            return self.vocabulary
+        else:
+            return self.tokenizer.vocab
 
     def get_word_id(self, word):
-        return self.vocabulary.token2id[word]
+        if not self.use_bert:
+            return self.vocabulary.token2id[word]
+        else:
+            return self.tokenizer.vocab[word]
+
 
     def get_word_from_id(self, index):
-        return self.vocabulary.id2token[index]
+        if not self.use_bert:
+            return self.vocabulary.id2token[index]
+        else:
+            return self.tokenizer.inv_vocab[index]
 
     def fit_document(self, documents):
         document_tokens = []
