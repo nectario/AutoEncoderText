@@ -25,6 +25,11 @@ def check_spelling(words_in_text, spellchecker):
             word_list.append(word)
     return word_list
 
+def load_genres(file_path):
+    current_genres_df = pd.read_excel(file_path)
+    genres = current_genres_df["Genre"].tolist()
+    return genres
+
 def is_all_lowercase(value):
     lowercase = [c for c in value if c.islower()]
     if len(value) == len(lowercase):
