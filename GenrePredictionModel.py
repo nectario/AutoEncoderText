@@ -18,7 +18,7 @@ from common.MultiVectorizer import *
 from common.data_utils import *
 
 MAX_WORDS = 150
-MAX_SENTENCES = 500
+MAX_SENTENCES = 320
 
 MAX_TEXT_LENGTH = 12500
 tqdm_notebook.pandas()
